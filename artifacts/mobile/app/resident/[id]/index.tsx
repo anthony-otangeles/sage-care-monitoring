@@ -139,7 +139,10 @@ export default function ResidentScreen() {
       }}>
         <SageHeader />
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace('/residents');
+          }}
           hitSlop={8}
           style={{
             flexDirection: 'row', alignItems: 'center', gap: 6,
