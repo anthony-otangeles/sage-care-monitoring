@@ -1,0 +1,234 @@
+Update the AI page to feel like a real AI-agent-first DON operational intelligence system instead of a generic chatbot.
+
+The current message:
+“Hi Jamie — I'm watching all 12 residents. Ask me anything, tap a suggestion below, or use @ to focus on a specific resident.”
+
+should be replaced with a much more operationally intelligent and clinically believable AI interaction experience.
+
+The AI should feel:
+
+* calm
+* operationally aware
+* continuously supervising residents
+* clinically intelligent
+* mobile-first
+* conversational
+* proactive but not alarmist
+
+The AI should feel like:
+“an intelligent operational partner supervising the facility alongside the DON.”
+
+Do NOT make this feel like ChatGPT or a generic assistant.
+
+---
+
+## NEW AI LANDING EXPERIENCE
+
+Replace the opening experience with:
+
+---
+
+Good morning Jamie.
+
+I’m actively monitoring 12 residents across East and West Hall.
+
+2 residents require elevated attention this morning.
+
+Highest concern:
+Mary Lou Smith — worsening confusion, poor intake, and increased transfer difficulty overnight.
+
+Current active risks:
+• dehydration progression
+• delirium worsening
+• fall vulnerability
+
+Provider has not yet been contacted.
+
+---
+
+Below this, create a “Suggested for you” section ABOVE the chat input.
+
+This section should feel dynamic, intelligent, and operationally relevant.
+
+Use horizontally scrollable rounded suggestion cards.
+
+Each suggestion should feel like:
+
+* an operational question
+* an escalation investigation
+* a supervision shortcut
+* or a trajectory clarification
+
+NOT generic AI prompts.
+
+---
+
+## SUGGESTED FOR YOU
+
+Create suggestion cards like:
+
+• What changed with Mary Lou overnight?
+• Why are you most concerned about Mary Lou?
+• Show unresolved concerns across the facility
+• Which residents are worsening fastest?
+• Has nursing reassessed Mary Lou yet?
+• Who is highest hospitalization risk today?
+• Show active surveillance residents
+• What residents concern you most right now?
+• Which residents have provider escalation pending?
+• Show me cognition decline trends
+• Which residents had abnormal overnight events?
+• Prepare provider summary for Mary Lou
+• What deterioration patterns are emerging?
+• Which residents remain unresolved since yesterday?
+
+These should visually feel:
+
+* operational
+* intelligent
+* contextual
+* calm
+* high-signal
+
+NOT like chatbot starter prompts.
+
+---
+
+## REALISTIC DON ↔ AI CONVERSATION SIMULATION
+
+Add a realistic simulated conversation already visible on the screen so stakeholders immediately understand how the AI behaves.
+
+The conversation should feel:
+
+* operationally mature
+* clinically intelligent
+* calm
+* concise
+* trajectory-aware
+* longitudinally aware
+
+Use this exact conversation structure:
+
+---
+
+Jamie:
+What changed with Mary Lou overnight?
+
+AI:
+Mary Lou demonstrated progressive confusion, worsening transfer dependence, and significantly reduced intake overnight compared to baseline.
+
+Most concerning changes:
+• increased lethargy
+• poor oral intake
+• delayed responses
+• increased transfer assistance requirement
+
+Trajectory worsened between approximately 1:00 AM and 5:00 AM.
+
+Current concern is evolving dehydration with possible UTI-associated delirium.
+
+---
+
+Jamie:
+Why are you more concerned this morning?
+
+AI:
+Concern increased because multiple deterioration signals converged within a short timeframe.
+
+The most important factors are:
+• cognition worsening above baseline
+• continued intake decline
+• increased weakness
+• functional mobility deterioration
+
+These changes increase risk for:
+• fall
+• hospitalization
+• worsening delirium
+• further dehydration progression
+
+---
+
+Jamie:
+Has the provider been contacted yet?
+
+AI:
+Not yet.
+
+Focused nursing reassessment was completed at 7:18 AM.
+
+Current recommendation:
+Notify NP due to persistent cognition decline, poor intake, and increasing weakness despite overnight monitoring.
+
+Would you like me to prepare a provider escalation summary?
+
+---
+
+Jamie:
+Yes, prepare the summary.
+
+AI:
+Preparing NP escalation summary now.
+
+Summary focus:
+• worsening confusion
+• intake decline
+• transfer deterioration
+• dehydration concern
+• possible infection-related delirium
+
+I will include:
+• trajectory evolution
+• overnight changes
+• current risks
+• unresolved concerns
+• reassessment findings
+
+---
+
+The AI responses should visually appear:
+
+* highly compressed
+* operationally intelligent
+* non-robotic
+* non-generic
+* clinically believable
+
+---
+
+## VISUAL DIRECTION
+
+The page should visually feel:
+
+* calm
+* modern
+* mobile-first
+* operationally intelligent
+* spacious
+* AI-native
+
+Avoid:
+
+* dashboard feel
+* dense tables
+* generic chatbot appearance
+* overly bright healthcare colors
+* EHR aesthetics
+
+Use:
+
+* rounded cards
+* subtle urgency indicators
+* soft elevation/shadows
+* progressive spacing
+* large readable typography
+* conversational AI bubbles
+* persistent AI presence
+
+The AI should feel continuously aware of the facility operational state.
+
+The experience should feel like:
+“A continuously intelligent operational command layer for the DON.”
+
+NOT:
+“A chatbot inside a nursing app.”

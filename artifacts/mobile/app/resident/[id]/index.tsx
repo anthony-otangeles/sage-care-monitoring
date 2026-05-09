@@ -31,19 +31,23 @@ export default function ResidentScreen() {
   const resident = getResident(id as string);
   const [tab, setTab] = useState<Tab>('situation');
   const [careSteps, setCareSteps] = useState(() => resident?.careSteps);
+  const [notifiedProvider, setNotifiedProvider] = useState<{ name: string; time: string } | null>(null);
 
   const handleSetTab = useCallback((next: Tab) => {
     easeAnimation();
     setTab(next);
   }, []);
 
-  const handleDelegate = useCallback(() => {
+  const handleDelegate = useCallback((providerName: string) => {
     easeAnimation();
     setCareSteps(prev => prev && ({
-      ...prev,
-      reassessment: 'active',
-      provider: prev.provider === 'done' ? 'done' : 'active',
+      surveillance: 'done',
+      reassessment: 'done',
+      provider: 'done',
     }));
+    const now = new Date();
+    const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    setNotifiedProvider({ name: providerName, time });
   }, []);
 
   if (!resident) {
@@ -128,7 +132,7 @@ export default function ResidentScreen() {
       <View style={{ flex: 1 }}>
         <Animated.View key={tab} entering={FadeIn.duration(180)} style={{ flex: 1 }}>
           {tab === 'situation' && (
-            <SituationTab resident={resident} careSteps={careSteps!} onDelegate={handleDelegate} />
+            <SituationTab resident={resident} careSteps={careSteps!} notifiedProvider={notifiedProvider} onDelegate={handleDelegate} />
           )}
           {tab === 'talk' && <TalkTab resident={resident} insetsBottom={insets.bottom} />}
           {tab === 'timeline' && <TimelineTab resident={resident} />}
@@ -140,12 +144,17 @@ export default function ResidentScreen() {
 
 /* ---------- CARE STEPPER ---------- */
 
-function CareStepper({ steps }: { steps: { surveillance: CareStep; reassessment: CareStep; provider: CareStep } }) {
+function CareStepper({
+  steps, notifiedProvider,
+}: {
+  steps: { surveillance: CareStep; reassessment: CareStep; provider: CareStep };
+  notifiedProvider?: { name: string; time: string } | null;
+}) {
   const c = useColors();
   const items: { label: string; state: CareStep }[] = [
-    { label: 'Active Surveillance', state: steps.surveillance },
-    { label: 'Reassessment Pending', state: steps.reassessment },
-    { label: 'Provider Notified', state: steps.provider },
+    { label: steps.surveillance === 'done' ? 'Surveillance Complete' : 'Active Surveillance', state: steps.surveillance },
+    { label: steps.reassessment === 'done' ? 'Reassessment Complete' : 'Reassessment Pending', state: steps.reassessment },
+    { label: steps.provider === 'done' ? 'Provider Notified' : 'Provider Notified', state: steps.provider },
   ];
 
   const colorFor = (s: CareStep) =>
@@ -199,6 +208,28 @@ function CareStepper({ steps }: { steps: { surveillance: CareStep; reassessment:
           </React.Fragment>
         ))}
       </View>
+
+      {notifiedProvider && (
+        <View style={{
+          marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: c.divider,
+          flexDirection: 'row', alignItems: 'center', gap: 10,
+        }}>
+          <View style={{
+            width: 28, height: 28, borderRadius: 14,
+            backgroundColor: c.mintTint, alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Feather name="phone-call" size={13} color={c.success} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 12, color: c.foreground }}>
+              {notifiedProvider.name}
+            </Text>
+            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 11, color: c.mutedForeground, marginTop: 2 }}>
+              Notified at {notifiedProvider.time} · awaiting response
+            </Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -206,19 +237,21 @@ function CareStepper({ steps }: { steps: { surveillance: CareStep; reassessment:
 /* ---------- SITUATION ---------- */
 
 function SituationTab({
-  resident, careSteps, onDelegate,
+  resident, careSteps, notifiedProvider, onDelegate,
 }: {
   resident: NonNullable<ReturnType<typeof getResident>>;
   careSteps: { surveillance: CareStep; reassessment: CareStep; provider: CareStep };
-  onDelegate: () => void;
+  notifiedProvider: { name: string; time: string } | null;
+  onDelegate: (providerName: string) => void;
 }) {
   const c = useColors();
   const [open, setOpen] = useState<number | null>(null);
   const [delegateOpen, setDelegateOpen] = useState(false);
+  const provider = 'Dr. Hannah Cole, NP';
 
   const handleConfirmDelegate = () => {
     setDelegateOpen(false);
-    setTimeout(onDelegate, 220);
+    setTimeout(() => onDelegate(provider), 220);
   };
 
   const handleToggleClarify = (i: number) => {
@@ -229,7 +262,7 @@ function SituationTab({
   return (
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 28 }}>
       {/* Care steps */}
-      <CareStepper steps={careSteps} />
+      <CareStepper steps={careSteps} notifiedProvider={notifiedProvider} />
 
       {/* Summary + Memory combined */}
       <View style={{ backgroundColor: c.card, borderRadius: 8, borderWidth: 1, borderColor: c.border, padding: 16 }}>
@@ -347,6 +380,7 @@ function SituationTab({
       <DelegateModal
         visible={delegateOpen}
         residentName={resident.name}
+        provider={provider}
         onClose={() => setDelegateOpen(false)}
         onConfirm={handleConfirmDelegate}
       />
@@ -357,15 +391,14 @@ function SituationTab({
 /* ---------- DELEGATE MODAL ---------- */
 
 function DelegateModal({
-  visible, residentName, onClose, onConfirm,
-}: { visible: boolean; residentName: string; onClose: () => void; onConfirm: () => void }) {
+  visible, residentName, provider, onClose, onConfirm,
+}: { visible: boolean; residentName: string; provider: string; onClose: () => void; onConfirm: () => void }) {
   const c = useColors();
   const firstName = residentName.split(' ')[0];
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable
-        onPress={onClose}
+      <View
         style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 20 }}
       >
         <Animated.View
@@ -373,8 +406,7 @@ function DelegateModal({
           exiting={FadeOut.duration(120)}
           style={{ width: '100%', maxWidth: 380 }}
         >
-          <Pressable
-            onPress={(e) => e.stopPropagation()}
+          <View
             style={{
               backgroundColor: c.card, borderRadius: 16, padding: 24,
               shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 8 },
@@ -385,7 +417,7 @@ function DelegateModal({
             <TouchableOpacity
               onPress={onClose}
               hitSlop={8}
-              style={{ position: 'absolute', top: 14, right: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}
+              style={{ position: 'absolute', top: 14, right: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center', zIndex: 1 }}
             >
               <Feather name="x" size={18} color={c.mutedForeground} />
             </TouchableOpacity>
@@ -394,18 +426,24 @@ function DelegateModal({
               Delegate Reassessment
             </Text>
             <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 22, color: c.mutedForeground, marginBottom: 20 }}>
-              Sage will message the charge nurse to perform a focused reassessment and request a full set of vitals.
+              Sage will message the charge nurse to perform a focused reassessment and notify the on-call provider.
             </Text>
 
             <View style={{ backgroundColor: c.background, borderRadius: 8, padding: 16, gap: 12, marginBottom: 24 }}>
               <View style={{ flexDirection: 'row', gap: 12 }}>
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 13, color: c.mutedForeground, width: 44 }}>To:</Text>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 13, color: c.mutedForeground, width: 64 }}>Charge:</Text>
                 <Text style={{ flex: 1, fontFamily: 'Inter_500Medium', fontSize: 13, color: c.foreground }}>
-                  Sarah Jenkins, RN (Charge)
+                  Sarah Jenkins, RN
                 </Text>
               </View>
               <View style={{ flexDirection: 'row', gap: 12 }}>
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 13, color: c.mutedForeground, width: 44 }}>Task:</Text>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 13, color: c.mutedForeground, width: 64 }}>Provider:</Text>
+                <Text style={{ flex: 1, fontFamily: 'Inter_500Medium', fontSize: 13, color: c.foreground }}>
+                  {provider}
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 13, color: c.mutedForeground, width: 64 }}>Task:</Text>
                 <Text style={{ flex: 1, fontFamily: 'Inter_500Medium', fontSize: 13, color: c.foreground, lineHeight: 19 }}>
                   Focus on mental status, lung sounds, and fresh vitals for {firstName}.
                 </Text>
@@ -431,9 +469,9 @@ function DelegateModal({
             >
               <Text style={{ color: c.mutedForeground, fontFamily: 'Inter_500Medium', fontSize: 14 }}>Cancel</Text>
             </TouchableOpacity>
-          </Pressable>
+          </View>
         </Animated.View>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
