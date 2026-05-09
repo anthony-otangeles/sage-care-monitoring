@@ -19,6 +19,7 @@ import { useColors } from '@/hooks/useColors';
 import { getResident, CareStep } from '@/data/residents';
 import { StatusChip, StatusVariant } from '@/components/StatusChip';
 import { SageHeader } from '@/components/SageHeader';
+import { VitalRow } from '@/components/VitalRow';
 
 type Tab = 'situation' | 'talk' | 'timeline';
 
@@ -288,16 +289,10 @@ function SituationTab({
           <View style={{ backgroundColor: c.card, borderRadius: 8, borderWidth: 1, borderColor: c.border, overflow: 'hidden' }}>
             {resident.situation.vitals.map((v, i) => (
               <View key={i} style={{
-                flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12,
+                padding: 14,
                 borderTopWidth: i === 0 ? 0 : 1, borderTopColor: c.divider,
               }}>
-                <Feather name={v.icon as any} size={16} color={v.isAbnormal ? c.warning : c.mutedForeground} />
-                <Text style={{ flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14, color: c.foreground }}>{v.label}</Text>
-                <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 12, color: c.placeholder }}>{v.base}</Text>
-                <TrendArrow base={v.base} current={v.current} isAbnormal={v.isAbnormal} />
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 14, color: v.isAbnormal ? c.warning : c.success, minWidth: 48, textAlign: 'right' }}>
-                  {v.current}
-                </Text>
+                <VitalRow {...v} />
               </View>
             ))}
           </View>
@@ -356,32 +351,6 @@ function SituationTab({
         onConfirm={handleConfirmDelegate}
       />
     </ScrollView>
-  );
-}
-
-/* ---------- TREND ARROW ---------- */
-
-function TrendArrow({ base, current, isAbnormal }: { base: string; current: string; isAbnormal: boolean }) {
-  const c = useColors();
-  // pull leading number from "120/80", "98.6", "180", etc.
-  const num = (s: string) => {
-    const m = s.match(/[-+]?\d+(?:\.\d+)?/);
-    return m ? parseFloat(m[0]) : NaN;
-  };
-  const b = num(base);
-  const v = num(current);
-  let icon: 'arrow-right' | 'arrow-up-right' | 'arrow-down-right' = 'arrow-right';
-  if (!isNaN(b) && !isNaN(v)) {
-    if (v > b) icon = 'arrow-up-right';
-    else if (v < b) icon = 'arrow-down-right';
-  }
-  return (
-    <Feather
-      name={icon}
-      size={14}
-      color={isAbnormal ? c.warning : c.placeholder}
-      style={{ marginHorizontal: 2 }}
-    />
   );
 }
 

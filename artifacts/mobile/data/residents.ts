@@ -31,6 +31,7 @@ export interface Resident {
       base: string;
       current: string;
       isAbnormal: boolean;
+      isCritical?: boolean;
     }[];
     clarify: {
       question: string;
@@ -76,8 +77,8 @@ export const residents: Resident[] = [
       ],
       vitals: [
         { label: "Heart Rate", icon: "activity", base: "88", current: "104", isAbnormal: true },
-        { label: "Temperature", icon: "thermometer", base: "98.6°", current: "100.4°", isAbnormal: true },
-        { label: "Blood Pressure", icon: "heart", base: "108/62", current: "96/58", isAbnormal: false },
+        { label: "Temperature", icon: "thermometer", base: "98.6°", current: "100.4°", isAbnormal: true, isCritical: true },
+        { label: "Blood Pressure", icon: "heart", base: "108/62", current: "96/58", isAbnormal: true, isCritical: true },
       ],
       clarify: [
         {
@@ -190,7 +191,7 @@ export const residents: Resident[] = [
         { title: "Elevated Blood Glucose", status: "TRENDING", color: "amber" }
       ],
       vitals: [
-        { label: "Fasting BG", icon: "activity", base: "110", current: "185", isAbnormal: true },
+        { label: "Fasting BG", icon: "activity", base: "110", current: "185", isAbnormal: true, isCritical: true },
       ],
       clarify: [
         { question: "Dietary compliance?", answer: "Family brought in cookies yesterday afternoon. He consumed several after dinner." }
@@ -283,7 +284,7 @@ export const residents: Resident[] = [
       vitals: [
         { label: "Heart Rate", icon: "activity", base: "70", current: "88", isAbnormal: true },
         { label: "Blood Pressure", icon: "heart", base: "118/72", current: "138/86", isAbnormal: true },
-        { label: "SpO2", icon: "activity", base: "97%", current: "94%", isAbnormal: true }
+        { label: "SpO2", icon: "activity", base: "97%", current: "94%", isAbnormal: true, isCritical: true }
       ],
       clarify: [
         { question: "Was there exertion before symptoms?", answer: "No, occurred at rest after meal." }
@@ -435,7 +436,7 @@ export const residents: Resident[] = [
       ],
       vitals: [
         { label: "Heart Rate", icon: "activity", base: "76", current: "84", isAbnormal: false },
-        { label: "Blood Pressure", icon: "heart", base: "132/78", current: "118/68", isAbnormal: true }
+        { label: "Blood Pressure", icon: "heart", base: "132/78", current: "118/68", isAbnormal: true, isCritical: true }
       ],
       clarify: [
         { question: "Any new medications?", answer: "Started new BP med 5 days ago." }

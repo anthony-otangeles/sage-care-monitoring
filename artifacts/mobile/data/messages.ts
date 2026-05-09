@@ -16,6 +16,8 @@ export interface ThreadMessage {
   authorId: string;
   text: string;
   ts: string;
+  kind?: "text" | "voice-call" | "video-call";
+  duration?: string;
 }
 
 export interface Thread {
@@ -107,7 +109,8 @@ export const threads: Thread[] = [
       { id: "m1", authorId: "u4", text: "Morning team — let's prioritize 204B today.", ts: "8:02 AM" },
       { id: "m2", authorId: "u1", text: "On it. @Mary Lou flagged DECLINING overnight, getting fresh vitals.", ts: "8:04 AM" },
       { id: "m3", authorId: "u2", text: "I'll cover @Walter Jefferson's post-fall checks.", ts: "8:06 AM" },
-      { id: "m4", authorId: "u1", text: "All vitals captured for @Mary Lou. Starting reassessment now.", ts: "8:14 AM" },
+      { id: "m4", authorId: "u4", text: "Group video call", ts: "8:10 AM", kind: "video-call", duration: "4 min 32 sec" },
+      { id: "m5", authorId: "u1", text: "All vitals captured for @Mary Lou. Starting reassessment now.", ts: "8:14 AM" },
     ],
   },
   {
@@ -136,7 +139,8 @@ export const threads: Thread[] = [
     unread: 0,
     messages: [
       { id: "m1", authorId: "me", text: "@Mary Lou — high suspicion UTI, requesting orders.", ts: "7:48 AM" },
-      { id: "m2", authorId: "u4", text: "Approved — start IV abx. I'll round at 10.", ts: "7:55 AM" },
+      { id: "m2", authorId: "u4", text: "Voice call", ts: "7:52 AM", kind: "voice-call", duration: "2 min 18 sec" },
+      { id: "m3", authorId: "u4", text: "Approved — start IV abx. I'll round at 10.", ts: "7:55 AM" },
     ],
   },
   {

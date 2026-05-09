@@ -114,6 +114,7 @@ export default function ThreadScreen() {
       <ThreadMenu
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
+        hasCalls={messages.some(m => m.kind === 'voice-call' || m.kind === 'video-call')}
         onPick={(k) => { setMenuOpen(false); setTimeout(() => setSheet(k), 80); }}
       />
       <ThreadInsightSheet
@@ -133,6 +134,38 @@ export default function ThreadScreen() {
           const author = isMe ? currentUser : getUser(item.authorId);
           const prev = index > 0 ? messages[index - 1] : undefined;
           const showAuthor = isHuddle && !isMe && prev?.authorId !== item.authorId;
+
+          if (item.kind === 'voice-call' || item.kind === 'video-call') {
+            const isVideo = item.kind === 'video-call';
+            return (
+              <View style={{ flexDirection: 'row', justifyContent: 'center', paddingVertical: 4 }}>
+                <View style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 8,
+                  paddingHorizontal: 12, paddingVertical: 8,
+                  backgroundColor: c.muted, borderRadius: 999,
+                  borderWidth: 1, borderColor: c.border,
+                }}>
+                  <View style={{
+                    width: 24, height: 24, borderRadius: 12,
+                    backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Feather name={isVideo ? 'video' : 'phone'} size={12} color="#FFFFFF" />
+                  </View>
+                  <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 12, color: c.foreground }}>
+                    {isVideo ? 'Video call' : 'Voice call'}
+                  </Text>
+                  {item.duration && (
+                    <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 12, color: c.mutedForeground }}>
+                      · {item.duration}
+                    </Text>
+                  )}
+                  <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 11, color: c.placeholder }}>
+                    · {item.ts}
+                  </Text>
+                </View>
+              </View>
+            );
+          }
 
           return (
             <View style={{ flexDirection: 'row', justifyContent: isMe ? 'flex-end' : 'flex-start', gap: 8 }}>
@@ -186,13 +219,15 @@ export default function ThreadScreen() {
 }
 
 function ThreadMenu({
-  visible, onClose, onPick,
-}: { visible: boolean; onClose: () => void; onPick: (k: 'summary' | 'transcription' | 'insight') => void }) {
+  visible, onClose, hasCalls, onPick,
+}: { visible: boolean; onClose: () => void; hasCalls: boolean; onPick: (k: 'summary' | 'transcription' | 'insight') => void }) {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const items: { key: 'summary' | 'transcription' | 'insight'; icon: keyof typeof Feather.glyphMap; label: string; sub: string }[] = [
     { key: 'summary', icon: 'file-text', label: 'View summary', sub: 'TL;DR of the conversation' },
-    { key: 'transcription', icon: 'mic', label: 'View transcription', sub: 'Voice & video call transcript' },
+    ...(hasCalls
+      ? [{ key: 'transcription' as const, icon: 'mic' as const, label: 'View transcription', sub: 'Voice & video call transcript' }]
+      : []),
     { key: 'insight', icon: 'zap', label: 'View insight', sub: 'AI analysis of patterns & action items' },
   ];
 

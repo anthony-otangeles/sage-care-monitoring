@@ -8,6 +8,7 @@ import { Feather } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { residents, Resident } from '@/data/residents';
 import { StatusChip, StatusVariant } from '@/components/StatusChip';
+import { VitalRow } from '@/components/VitalRow';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -80,21 +81,22 @@ export default function SituationScreen() {
               </TouchableOpacity>
 
               {isOpen && (
-                <Animated.View entering={FadeIn.duration(180)} style={{ padding: 14, paddingTop: 0, gap: 14 }}>
+                <Animated.View entering={FadeIn.duration(180)} style={{ padding: 14, paddingTop: 0, gap: 22 }}>
                   <View style={{ height: 1, backgroundColor: c.divider }} />
 
                   <View style={{
                     flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-                    backgroundColor: c.brandLight, borderRadius: 8, padding: 10,
+                    backgroundColor: c.muted, borderRadius: 8, padding: 12,
+                    borderWidth: 1, borderColor: c.border,
                   }}>
-                    <Feather name="alert-circle" size={14} color={c.brandText} style={{ marginTop: 2 }} />
-                    <Text style={{ flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 13, lineHeight: 18, color: c.brandText }}>
+                    <Feather name="alert-circle" size={14} color={c.mutedForeground} style={{ marginTop: 2 }} />
+                    <Text style={{ flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 13, lineHeight: 18, color: c.foreground }}>
                       {r.latest}
                     </Text>
                   </View>
 
                   <View>
-                    <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.mutedForeground, marginBottom: 6 }}>
+                    <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.mutedForeground, marginBottom: 8 }}>
                       SUMMARY
                     </Text>
                     <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 20, color: c.foreground }}>
@@ -104,10 +106,10 @@ export default function SituationScreen() {
 
                   {r.situation.concerns.length > 0 && (
                     <View>
-                      <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.mutedForeground, marginBottom: 8 }}>
+                      <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.mutedForeground, marginBottom: 10 }}>
                         UNRESOLVED CONCERNS
                       </Text>
-                      <View style={{ gap: 6 }}>
+                      <View style={{ gap: 8 }}>
                         {r.situation.concerns.map((concern, i) => (
                           <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                             <View style={{
@@ -126,20 +128,12 @@ export default function SituationScreen() {
 
                   {r.situation.vitals.length > 0 && (
                     <View>
-                      <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.mutedForeground, marginBottom: 8 }}>
+                      <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.mutedForeground, marginBottom: 10 }}>
                         VITALS
                       </Text>
-                      <View style={{ gap: 6 }}>
+                      <View style={{ gap: 10 }}>
                         {r.situation.vitals.map((v, i) => (
-                          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                            <Feather name={v.icon as any} size={14} color={v.isAbnormal ? c.warning : c.mutedForeground} />
-                            <Text style={{ flex: 1, fontFamily: 'Inter_500Medium', fontSize: 13, color: c.foreground }}>{v.label}</Text>
-                            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 12, color: c.placeholder }}>{v.base}</Text>
-                            <Feather name="arrow-right" size={12} color={c.placeholder} />
-                            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 13, color: v.isAbnormal ? c.warning : c.success, minWidth: 48, textAlign: 'right' }}>
-                              {v.current}
-                            </Text>
-                          </View>
+                          <VitalRow key={i} {...v} size="sm" />
                         ))}
                       </View>
                     </View>
