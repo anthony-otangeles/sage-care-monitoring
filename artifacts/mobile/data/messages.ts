@@ -34,8 +34,8 @@ export interface Thread {
 
 export const currentUser: User = {
   id: "me",
-  name: "Jamie Patel, RN",
-  role: "Day Shift Lead",
+  name: "Jamie Patel, MSN, RN",
+  role: "Director of Nursing",
   image: require("@/assets/images/resident-3.png"),
   presence: "online",
 };

@@ -49,7 +49,7 @@ export default function SettingsScreen() {
               {currentUser.name}
             </Text>
             <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 12, color: c.mutedForeground, marginTop: 4 }}>
-              {currentUser.role} · 2 East
+              {currentUser.role} · Maple Grove
             </Text>
           </View>
           <TouchableOpacity
