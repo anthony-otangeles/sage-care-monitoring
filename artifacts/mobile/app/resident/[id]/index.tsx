@@ -63,7 +63,7 @@ export default function ResidentScreen() {
       {/* Sticky top: Profile + Tabs */}
       <View style={{
         backgroundColor: c.card,
-        paddingTop: insets.top + (Platform.OS === 'web' ? 16 : 8),
+        paddingTop: insets.top + (Platform.OS === 'web' ? 60 : 16),
         borderBottomWidth: 1, borderBottomColor: c.divider,
       }}>
         {/* Profile — full width */}
