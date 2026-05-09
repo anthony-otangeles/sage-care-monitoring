@@ -2,6 +2,7 @@ import React, { useMemo, useState, useRef, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { residents } from '@/data/residents';
 
@@ -137,18 +138,29 @@ export function MentionInput({ value, onChange, onSend, onMic, placeholder }: Me
   );
 }
 
-/* Render a message body with @mentions highlighted */
+/* Render a message body with @mentions highlighted. Resident mentions are tappable. */
 export function MessageBody({ text, color, mentionColor }: { text: string; color: string; mentionColor: string }) {
+  const router = useRouter();
   const parts = text.split(/(@[A-Za-z][A-Za-z\-']*(?:\s[A-Z][A-Za-z\-']*)?)/g);
   return (
     <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 20, color }}>
-      {parts.map((p, i) =>
-        p.startsWith('@') ? (
-          <Text key={i} style={{ color: mentionColor, fontFamily: 'Inter_600SemiBold' }}>{p}</Text>
-        ) : (
-          <Text key={i}>{p}</Text>
-        )
-      )}
+      {parts.map((p, i) => {
+        if (!p.startsWith('@')) return <Text key={i}>{p}</Text>;
+        const name = p.slice(1).trim();
+        const match = residents.find(r => r.name.toLowerCase() === name.toLowerCase());
+        if (match) {
+          return (
+            <Text
+              key={i}
+              onPress={(e: any) => { e?.stopPropagation?.(); router.push(`/resident/${match.id}`); }}
+              style={{ color: mentionColor, fontFamily: 'Inter_600SemiBold', textDecorationLine: 'underline' }}
+            >
+              {p}
+            </Text>
+          );
+        }
+        return <Text key={i} style={{ color: mentionColor, fontFamily: 'Inter_600SemiBold' }}>{p}</Text>;
+      })}
     </Text>
   );
 }
