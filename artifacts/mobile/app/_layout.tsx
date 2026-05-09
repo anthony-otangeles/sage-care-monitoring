@@ -20,7 +20,6 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
@@ -28,8 +27,9 @@ const queryClient = new QueryClient();
 function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerShown: false, headerBackTitle: "Back" }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="resident/[id]/index" />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="resident/[id]" />
+      <Stack.Screen name="thread/[id]" />
     </Stack>
   );
 }
@@ -41,7 +41,6 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
   });
-
   const [cormorantLoaded, cormorantError] = useCormorantFonts({
     CormorantGaramond_500Medium,
     CormorantGaramond_600SemiBold,
@@ -51,9 +50,7 @@ export default function RootLayout() {
   const fontError = interError || cormorantError;
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
-    }
+    if (fontsLoaded || fontError) SplashScreen.hideAsync();
   }, [fontsLoaded, fontError]);
 
   if (!fontsLoaded && !fontError) return null;

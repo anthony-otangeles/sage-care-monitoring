@@ -9,7 +9,7 @@ import { StatusChip, StatusVariant } from '@/components/StatusChip';
 
 type Row = { isHeader: true; title: AcuityLevel; count: number } | (Resident & { isHeader?: false });
 
-export default function RosterScreen() {
+export default function RostersScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -28,12 +28,12 @@ export default function RosterScreen() {
     <View style={{ flex: 1, backgroundColor: c.background }}>
       <View style={{
         paddingHorizontal: 24,
-        paddingTop: insets.top + (Platform.OS === 'web' ? 67 : 16),
+        paddingTop: insets.top + (Platform.OS === 'web' ? 60 : 16),
         paddingBottom: 16,
         backgroundColor: c.card,
         borderBottomWidth: 1, borderBottomColor: c.divider,
       }}>
-        <Text style={{ color: c.foreground, fontSize: 24, fontFamily: 'Inter_700Bold' }}>Roster</Text>
+        <Text style={{ color: c.foreground, fontSize: 24, fontFamily: 'Inter_700Bold' }}>Residents</Text>
         <Text style={{ color: c.mutedForeground, fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 4 }}>
           {residents.length} residents · Day shift
         </Text>
@@ -43,15 +43,12 @@ export default function RosterScreen() {
         keyExtractor={item =>
           'isHeader' in item && item.isHeader ? `h-${item.title}` : `r-${(item as Resident).id}`
         }
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+        contentContainerStyle={{ paddingBottom: 24 }}
         renderItem={({ item }) => {
           if ('isHeader' in item && item.isHeader) {
             return (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 12 }}>
-                <Text style={{
-                  color: c.mutedForeground, fontFamily: 'Inter_700Bold',
-                  fontSize: 11, letterSpacing: 0.88,
-                }}>
+                <Text style={{ color: c.mutedForeground, fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88 }}>
                   {item.title}
                 </Text>
                 <Text style={{ color: c.placeholder, fontFamily: 'Inter_500Medium', fontSize: 11 }}>
@@ -77,18 +74,13 @@ export default function RosterScreen() {
                 <Text style={{ color: c.foreground, fontFamily: 'Inter_700Bold', fontSize: 16, marginBottom: 4 }}>
                   {r.name}
                 </Text>
-                <Text
-                  style={{ color: c.mutedForeground, fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 16 }}
-                  numberOfLines={2}
-                >
+                <Text style={{ color: c.mutedForeground, fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 16 }} numberOfLines={2}>
                   {r.latest}
                 </Text>
               </View>
               {r.statusChips.length > 0 && (
                 <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                  {r.statusChips.map((s, i) => (
-                    <StatusChip key={i} variant={s as StatusVariant} label={s} />
-                  ))}
+                  {r.statusChips.map((s, i) => <StatusChip key={i} variant={s as StatusVariant} label={s} />)}
                 </View>
               )}
             </TouchableOpacity>

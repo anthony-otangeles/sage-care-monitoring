@@ -261,6 +261,192 @@ export const residents: Resident[] = [
     talk: [
       { id: "m1", sender: "sage", text: "Doris had a good night and is stable." }
     ]
+  },
+  {
+    id: "7",
+    name: "Beatrice Holloway",
+    age: 91,
+    sex: "F",
+    room: "208",
+    acuity: "WATCHFUL",
+    statusChips: ["DECLINING"],
+    image: require("@/assets/images/resident-6.png"),
+    codeStatus: "DNR/DNI",
+    latest: "New onset chest tightness post-meal",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
+    situation: {
+      summary: "Beatrice reported chest tightness after lunch. EKG unremarkable. Vitals trending toward baseline but daughter requests close monitoring.",
+      memory: "Hx CHF, on furosemide. Daughter is HCPOA, very involved.",
+      concerns: [
+        { title: "Atypical Chest Pain", status: "NEW", color: "coral" }
+      ],
+      vitals: [
+        { label: "Heart Rate", icon: "activity", base: "70", current: "88", isAbnormal: true },
+        { label: "Blood Pressure", icon: "heart", base: "118/72", current: "138/86", isAbnormal: true },
+        { label: "SpO2", icon: "activity", base: "97%", current: "94%", isAbnormal: true }
+      ],
+      clarify: [
+        { question: "Was there exertion before symptoms?", answer: "No, occurred at rest after meal." }
+      ]
+    },
+    timeline: [
+      { id: "t1", timeAgo: "1 HOUR AGO", period: "AFTERNOON", icon: "alert-circle", text: "Chest tightness reported." }
+    ],
+    talk: [
+      { id: "m1", sender: "sage", text: "I'd recommend cardiology phone consult." }
+    ]
+  },
+  {
+    id: "8",
+    name: "Raymond Cho",
+    age: 73,
+    sex: "M",
+    room: "212A",
+    acuity: "MONITORING",
+    statusChips: [],
+    image: require("@/assets/images/resident-2.png"),
+    codeStatus: "Full Code",
+    latest: "Wound check due, healing well",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Surgical wound on right calf granulating well. No drainage or odor. Pain controlled on PRN acetaminophen.",
+      memory: "S/p AKA 6 weeks ago. Strong rehab motivation.",
+      concerns: [
+        { title: "Wound Healing", status: "WATCHING", color: "amber" }
+      ],
+      vitals: [
+        { label: "Heart Rate", icon: "activity", base: "72", current: "74", isAbnormal: false },
+        { label: "Temperature", icon: "thermometer", base: "98.4°", current: "98.6°", isAbnormal: false }
+      ],
+      clarify: []
+    },
+    timeline: [
+      { id: "t1", timeAgo: "3 HOURS AGO", period: "MORNING", icon: "check-circle", text: "Dressing change tolerated well." }
+    ],
+    talk: [
+      { id: "m1", sender: "sage", text: "Healing on schedule." }
+    ]
+  },
+  {
+    id: "9",
+    name: "Ingrid Larsson",
+    age: 86,
+    sex: "F",
+    room: "216",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-1.png"),
+    codeStatus: "DNR",
+    latest: "Cheerful, joined morning singalong",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Ingrid is in good spirits. Ate full breakfast. No complaints.",
+      memory: "Former music teacher. Loves choir activities.",
+      concerns: [],
+      vitals: [
+        { label: "Heart Rate", icon: "activity", base: "76", current: "74", isAbnormal: false }
+      ],
+      clarify: []
+    },
+    timeline: [
+      { id: "t1", timeAgo: "2 HOURS AGO", period: "MORNING", icon: "music", text: "Led morning singalong." }
+    ],
+    talk: [
+      { id: "m1", sender: "sage", text: "Ingrid is having a great morning." }
+    ]
+  },
+  {
+    id: "10",
+    name: "Otis McKenna",
+    age: 79,
+    sex: "M",
+    room: "219B",
+    acuity: "MONITORING",
+    statusChips: [],
+    image: require("@/assets/images/resident-4.png"),
+    codeStatus: "Full Code",
+    latest: "AFib rate trending up, asymptomatic",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
+    situation: {
+      summary: "Heart rate has crept up over past 24 hours. Patient denies palpitations or shortness of breath. Continues home meds.",
+      memory: "Chronic AFib, anticoagulated. Avid Sudoku player.",
+      concerns: [
+        { title: "Rate Control", status: "TRENDING", color: "amber" }
+      ],
+      vitals: [
+        { label: "Heart Rate", icon: "activity", base: "78", current: "96", isAbnormal: true },
+        { label: "Blood Pressure", icon: "heart", base: "126/74", current: "122/76", isAbnormal: false }
+      ],
+      clarify: []
+    },
+    timeline: [
+      { id: "t1", timeAgo: "30 MIN AGO", period: "MORNING", icon: "trending-up", text: "HR 96 noted on rounds." }
+    ],
+    talk: [
+      { id: "m1", sender: "sage", text: "Watch for symptoms; consider provider notification if rate >110." }
+    ]
+  },
+  {
+    id: "11",
+    name: "Constance Webb",
+    age: 88,
+    sex: "F",
+    room: "201A",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-5.png"),
+    codeStatus: "Comfort Care",
+    latest: "Comfortable, family visiting today",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Resting comfortably. Pain rating 0/10. Family expected at 2pm.",
+      memory: "Hospice eligible. Prefers chamomile tea in afternoons.",
+      concerns: [],
+      vitals: [
+        { label: "Heart Rate", icon: "activity", base: "70", current: "72", isAbnormal: false }
+      ],
+      clarify: []
+    },
+    timeline: [
+      { id: "t1", timeAgo: "4 HOURS AGO", period: "MORNING", icon: "smile", text: "Family confirmed afternoon visit." }
+    ],
+    talk: [
+      { id: "m1", sender: "sage", text: "Constance is peaceful and ready for visitors." }
+    ]
+  },
+  {
+    id: "12",
+    name: "Eduardo Salinas",
+    age: 81,
+    sex: "M",
+    room: "222",
+    acuity: "WATCHFUL",
+    statusChips: ["DECLINING"],
+    image: require("@/assets/images/resident-3.png"),
+    codeStatus: "Full Code",
+    latest: "Decreased PO intake, fatigue",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
+    situation: {
+      summary: "Eduardo has eaten less than 25% of meals over past 48 hours. Reports fatigue. Weight down 1.2 kg this week.",
+      memory: "Hx CKD stage 3. Speaks Spanish, English when alert.",
+      concerns: [
+        { title: "Poor PO Intake", status: "NEW", color: "coral" },
+        { title: "Weight Loss", status: "WATCHING", color: "amber" }
+      ],
+      vitals: [
+        { label: "Heart Rate", icon: "activity", base: "76", current: "84", isAbnormal: false },
+        { label: "Blood Pressure", icon: "heart", base: "132/78", current: "118/68", isAbnormal: true }
+      ],
+      clarify: [
+        { question: "Any new medications?", answer: "Started new BP med 5 days ago." }
+      ]
+    },
+    timeline: [
+      { id: "t1", timeAgo: "5 HOURS AGO", period: "MORNING", icon: "alert-triangle", text: "Refused breakfast." }
+    ],
+    talk: [
+      { id: "m1", sender: "sage", text: "Consider dietitian consult and BMP recheck." }
+    ]
   }
 ];
 
