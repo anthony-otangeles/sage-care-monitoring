@@ -31,23 +31,23 @@ export default function ResidentScreen() {
   const resident = getResident(id as string);
   const [tab, setTab] = useState<Tab>('situation');
   const [careSteps, setCareSteps] = useState(() => resident?.careSteps);
-  const [notifiedProvider, setNotifiedProvider] = useState<{ name: string; time: string } | null>(null);
+  const [assignedNurse, setAssignedNurse] = useState<{ name: string; time: string } | null>(null);
 
   const handleSetTab = useCallback((next: Tab) => {
     easeAnimation();
     setTab(next);
   }, []);
 
-  const handleDelegate = useCallback((providerName: string) => {
+  const handleDelegate = useCallback((nurseName: string) => {
     easeAnimation();
-    setCareSteps(prev => prev && ({
+    setCareSteps(() => ({
       surveillance: 'done',
-      reassessment: 'done',
-      provider: 'done',
+      reassessment: 'active',
+      provider: 'pending',
     }));
     const now = new Date();
     const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    setNotifiedProvider({ name: providerName, time });
+    setAssignedNurse({ name: nurseName, time });
   }, []);
 
   if (!resident) {
@@ -132,7 +132,7 @@ export default function ResidentScreen() {
       <View style={{ flex: 1 }}>
         <Animated.View key={tab} entering={FadeIn.duration(180)} style={{ flex: 1 }}>
           {tab === 'situation' && (
-            <SituationTab resident={resident} careSteps={careSteps!} notifiedProvider={notifiedProvider} onDelegate={handleDelegate} />
+            <SituationTab resident={resident} careSteps={careSteps!} assignedNurse={assignedNurse} onDelegate={handleDelegate} />
           )}
           {tab === 'talk' && <TalkTab resident={resident} insetsBottom={insets.bottom} />}
           {tab === 'timeline' && <TimelineTab resident={resident} />}
@@ -145,16 +145,16 @@ export default function ResidentScreen() {
 /* ---------- CARE STEPPER ---------- */
 
 function CareStepper({
-  steps, notifiedProvider,
+  steps, assignedNurse,
 }: {
   steps: { surveillance: CareStep; reassessment: CareStep; provider: CareStep };
-  notifiedProvider?: { name: string; time: string } | null;
+  assignedNurse?: { name: string; time: string } | null;
 }) {
   const c = useColors();
   const items: { label: string; state: CareStep }[] = [
     { label: steps.surveillance === 'done' ? 'Surveillance Complete' : 'Active Surveillance', state: steps.surveillance },
-    { label: steps.reassessment === 'done' ? 'Reassessment Complete' : 'Reassessment Pending', state: steps.reassessment },
-    { label: steps.provider === 'done' ? 'Provider Notified' : 'Provider Notified', state: steps.provider },
+    { label: steps.reassessment === 'active' ? 'Reassessment In Progress' : steps.reassessment === 'done' ? 'Reassessment Complete' : 'Reassessment Pending', state: steps.reassessment },
+    { label: 'Provider Notified', state: steps.provider },
   ];
 
   const colorFor = (s: CareStep) =>
@@ -209,23 +209,23 @@ function CareStepper({
         ))}
       </View>
 
-      {notifiedProvider && (
+      {assignedNurse && (
         <View style={{
           marginTop: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: c.divider,
           flexDirection: 'row', alignItems: 'center', gap: 10,
         }}>
           <View style={{
             width: 28, height: 28, borderRadius: 14,
-            backgroundColor: c.mintTint, alignItems: 'center', justifyContent: 'center',
+            backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center',
           }}>
-            <Feather name="phone-call" size={13} color={c.success} />
+            <Feather name="user-check" size={13} color={c.brand} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 12, color: c.foreground }}>
-              {notifiedProvider.name}
+              {assignedNurse.name}
             </Text>
             <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 11, color: c.mutedForeground, marginTop: 2 }}>
-              Notified at {notifiedProvider.time} · awaiting response
+              Assigned at {assignedNurse.time} · will notify provider when reassessment completes
             </Text>
           </View>
         </View>
@@ -237,21 +237,22 @@ function CareStepper({
 /* ---------- SITUATION ---------- */
 
 function SituationTab({
-  resident, careSteps, notifiedProvider, onDelegate,
+  resident, careSteps, assignedNurse, onDelegate,
 }: {
   resident: NonNullable<ReturnType<typeof getResident>>;
   careSteps: { surveillance: CareStep; reassessment: CareStep; provider: CareStep };
-  notifiedProvider: { name: string; time: string } | null;
-  onDelegate: (providerName: string) => void;
+  assignedNurse: { name: string; time: string } | null;
+  onDelegate: (nurseName: string) => void;
 }) {
   const c = useColors();
   const [open, setOpen] = useState<number | null>(null);
   const [delegateOpen, setDelegateOpen] = useState(false);
-  const provider = 'Dr. Hannah Cole, NP';
+  const chargeNurse = 'Sarah Jenkins, RN';
+  const provider = 'Dr. Hannah Cole';
 
   const handleConfirmDelegate = () => {
     setDelegateOpen(false);
-    setTimeout(() => onDelegate(provider), 220);
+    setTimeout(() => onDelegate(chargeNurse), 220);
   };
 
   const handleToggleClarify = (i: number) => {
@@ -262,7 +263,7 @@ function SituationTab({
   return (
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 28 }}>
       {/* Care steps */}
-      <CareStepper steps={careSteps} notifiedProvider={notifiedProvider} />
+      <CareStepper steps={careSteps} assignedNurse={assignedNurse} />
 
       {/* Summary + Memory combined */}
       <View style={{ backgroundColor: c.card, borderRadius: 8, borderWidth: 1, borderColor: c.border, padding: 16 }}>
