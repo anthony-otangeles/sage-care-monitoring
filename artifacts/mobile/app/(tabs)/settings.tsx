@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Switch, Platform, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Platform, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { Avatar } from '@/components/Avatar';
+import { PillToggle } from '@/components/PillToggle';
 import { currentUser } from '@/data/messages';
 
 export default function SettingsScreen() {
@@ -73,7 +74,7 @@ export default function SettingsScreen() {
             icon="shield"
             label="Two-Factor Authentication"
             subtitle={twoFA ? 'Enabled · Authenticator app' : 'Add an extra layer of security'}
-            right={<Switch value={twoFA} onValueChange={setTwoFA} trackColor={{ true: c.brand, false: c.borderStrong }} thumbColor="#FFFFFF" />}
+            right={<PillToggle value={twoFA} onValueChange={setTwoFA} />}
           />
           <Row icon="user" label="Personal Info" onPress={() => {}} />
           <Row icon="briefcase" label="License & Credentials" onPress={() => {}} isLast />
@@ -83,7 +84,7 @@ export default function SettingsScreen() {
           <Row
             icon="bell"
             label="Push Notifications"
-            right={<Switch value={pushOn} onValueChange={setPushOn} trackColor={{ true: c.brand, false: c.borderStrong }} thumbColor="#FFFFFF" />}
+            right={<PillToggle value={pushOn} onValueChange={setPushOn} />}
           />
           <Row icon="moon" label="Appearance" subtitle="System" onPress={() => {}} />
           <Row icon="globe" label="Language" subtitle="English (US)" onPress={() => {}} isLast />

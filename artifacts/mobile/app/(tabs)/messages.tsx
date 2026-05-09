@@ -18,12 +18,28 @@ type Tab = 'threads' | 'new';
 export default function MessagesScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>('threads');
+  const [selected, setSelected] = useState<string[]>([]);
 
   const switchTab = (next: Tab) => {
     if (Platform.OS !== 'web') LayoutAnimation.configureNext(LayoutAnimation.create(180, 'easeInEaseOut', 'opacity'));
+    setSelected([]);
     setTab(next);
   };
+
+  const toggleSelect = (id: string) => {
+    if (Platform.OS !== 'web') LayoutAnimation.configureNext(LayoutAnimation.create(160, 'easeInEaseOut', 'opacity'));
+    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const startHuddle = () => {
+    if (selected.length === 0) return;
+    setSelected([]);
+    router.push('/thread/t1');
+  };
+
+  const showHuddle = tab === 'new' && selected.length > 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
@@ -34,7 +50,27 @@ export default function MessagesScreen() {
         backgroundColor: c.card,
         borderBottomWidth: 1, borderBottomColor: c.divider,
       }}>
-        <Text style={{ color: c.foreground, fontSize: 24, fontFamily: 'Inter_700Bold' }}>Messages</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 36 }}>
+          <Text style={{ color: c.foreground, fontSize: 24, fontFamily: 'Inter_700Bold' }}>Messages</Text>
+          {showHuddle && (
+            <Animated.View entering={FadeIn.duration(180)}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={startHuddle}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 6,
+                  paddingHorizontal: 14, height: 36, borderRadius: 18,
+                  backgroundColor: c.brand,
+                }}
+              >
+                <Feather name="users" size={14} color="#FFFFFF" />
+                <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 13 }}>
+                  Huddle · {selected.length}
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
+        </View>
 
         <View style={{ flexDirection: 'row', marginTop: 16, gap: 4 }}>
           {(['threads', 'new'] as Tab[]).map(t => {
@@ -64,7 +100,7 @@ export default function MessagesScreen() {
       </View>
 
       <Animated.View key={tab} entering={FadeIn.duration(180)} style={{ flex: 1 }}>
-        {tab === 'threads' ? <ThreadsList /> : <NewList />}
+        {tab === 'threads' ? <ThreadsList /> : <NewList selected={selected} onToggle={toggleSelect} />}
       </Animated.View>
     </View>
   );
@@ -159,9 +195,10 @@ function ThreadsList() {
   );
 }
 
-function NewList() {
+function NewList({ selected, onToggle }: { selected: string[]; onToggle: (id: string) => void }) {
   const c = useColors();
   const router = useRouter();
+  const inSelectMode = selected.length > 0;
 
   const sorted = users.slice().sort((a, b) => {
     const order = { online: 0, away: 1, offline: 2 };
@@ -169,18 +206,23 @@ function NewList() {
   });
 
   const renderItem = ({ item }: { item: User }) => {
+    const isSelected = selected.includes(item.id);
     const presenceLabel =
       item.presence === 'online' ? 'Online' :
       item.presence === 'away' ? `Away · ${item.lastSeen ?? ''}` :
       `Offline · ${item.lastSeen ?? ''}`;
 
     return (
-      <View style={{
-        flexDirection: 'row', alignItems: 'center', gap: 12,
-        paddingHorizontal: 16, paddingVertical: 12,
-        backgroundColor: c.card,
-        borderBottomWidth: 1, borderBottomColor: c.divider,
-      }}>
+      <TouchableOpacity
+        activeOpacity={0.6}
+        onPress={() => onToggle(item.id)}
+        style={{
+          flexDirection: 'row', alignItems: 'center', gap: 12,
+          paddingHorizontal: 16, paddingVertical: 12,
+          backgroundColor: isSelected ? c.brandLight : c.card,
+          borderBottomWidth: 1, borderBottomColor: c.divider,
+        }}
+      >
         <Avatar source={item.image} size={44} presence={item.presence} />
         <View style={{ flex: 1 }}>
           <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 14, color: c.foreground }} numberOfLines={1}>
@@ -190,12 +232,24 @@ function NewList() {
             {item.role} · {presenceLabel}
           </Text>
         </View>
-        <View style={{ flexDirection: 'row', gap: 6 }}>
-          <ActionButton icon="message-circle" onPress={() => router.push(`/thread/dm-${item.id}`)} color={c.brand} bg={c.brandLight} />
-          <ActionButton icon="phone" onPress={() => {}} color={c.success} bg={c.mintTint} />
-          <ActionButton icon="video" onPress={() => {}} color={c.info} bg={c.lavenderTint} />
-        </View>
-      </View>
+        {inSelectMode ? (
+          <View style={{
+            width: 24, height: 24, borderRadius: 12,
+            borderWidth: 2,
+            borderColor: isSelected ? c.brand : c.borderStrong,
+            backgroundColor: isSelected ? c.brand : 'transparent',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            {isSelected && <Feather name="check" size={14} color="#FFFFFF" />}
+          </View>
+        ) : (
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <ActionButton icon="message-circle" onPress={() => router.push(`/thread/dm-${item.id}`)} color={c.brand} bg={c.brandLight} />
+            <ActionButton icon="phone" onPress={() => {}} color={c.success} bg={c.mintTint} />
+            <ActionButton icon="video" onPress={() => {}} color={c.info} bg={c.lavenderTint} />
+          </View>
+        )}
+      </TouchableOpacity>
     );
   };
 
@@ -203,10 +257,11 @@ function NewList() {
     <FlatList
       data={sorted}
       keyExtractor={u => u.id}
+      extraData={selected}
       ListHeaderComponent={
         <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
           <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.mutedForeground }}>
-            START A NEW CONVERSATION
+            {inSelectMode ? `${selected.length} SELECTED · TAP HUDDLE TO START` : 'START A NEW CONVERSATION'}
           </Text>
         </View>
       }
