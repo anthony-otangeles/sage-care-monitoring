@@ -1,5 +1,16 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, FlatList, Platform, KeyboardAvoidingView } from 'react-native';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, FlatList, Platform, KeyboardAvoidingView, Modal, Pressable, LayoutAnimation, UIManager } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSpring, FadeIn, FadeOut } from 'react-native-reanimated';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const easeAnimation = () => {
+  if (Platform.OS !== 'web') {
+    LayoutAnimation.configureNext(LayoutAnimation.create(220, 'easeInEaseOut', 'opacity'));
+  }
+};
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
@@ -18,6 +29,21 @@ export default function ResidentScreen() {
   const insets = useSafeAreaInsets();
   const resident = getResident(id as string);
   const [tab, setTab] = useState<Tab>('situation');
+  const [careSteps, setCareSteps] = useState(() => resident?.careSteps);
+
+  const handleSetTab = useCallback((next: Tab) => {
+    easeAnimation();
+    setTab(next);
+  }, []);
+
+  const handleDelegate = useCallback(() => {
+    easeAnimation();
+    setCareSteps(prev => prev && ({
+      ...prev,
+      reassessment: 'active',
+      provider: prev.provider === 'done' ? 'done' : 'active',
+    }));
+  }, []);
 
   if (!resident) {
     return (
@@ -73,7 +99,7 @@ export default function ResidentScreen() {
             return (
               <TouchableOpacity
                 key={key}
-                onPress={() => setTab(key)}
+                onPress={() => handleSetTab(key)}
                 activeOpacity={0.7}
                 style={{
                   flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -97,11 +123,15 @@ export default function ResidentScreen() {
         </View>
       </View>
 
-      {/* Tab content */}
+      {/* Tab content with smooth fade */}
       <View style={{ flex: 1 }}>
-        {tab === 'situation' && <SituationTab resident={resident} />}
-        {tab === 'talk' && <TalkTab resident={resident} insetsBottom={insets.bottom} />}
-        {tab === 'timeline' && <TimelineTab resident={resident} />}
+        <Animated.View key={tab} entering={FadeIn.duration(180)} style={{ flex: 1 }}>
+          {tab === 'situation' && (
+            <SituationTab resident={resident} careSteps={careSteps!} onDelegate={handleDelegate} />
+          )}
+          {tab === 'talk' && <TalkTab resident={resident} insetsBottom={insets.bottom} />}
+          {tab === 'timeline' && <TimelineTab resident={resident} />}
+        </Animated.View>
       </View>
     </View>
   );
@@ -174,14 +204,31 @@ function CareStepper({ steps }: { steps: { surveillance: CareStep; reassessment:
 
 /* ---------- SITUATION ---------- */
 
-function SituationTab({ resident }: { resident: ReturnType<typeof getResident> & {} }) {
+function SituationTab({
+  resident, careSteps, onDelegate,
+}: {
+  resident: NonNullable<ReturnType<typeof getResident>>;
+  careSteps: { surveillance: CareStep; reassessment: CareStep; provider: CareStep };
+  onDelegate: () => void;
+}) {
   const c = useColors();
   const [open, setOpen] = useState<number | null>(null);
+  const [delegateOpen, setDelegateOpen] = useState(false);
+
+  const handleConfirmDelegate = () => {
+    setDelegateOpen(false);
+    setTimeout(onDelegate, 220);
+  };
+
+  const handleToggleClarify = (i: number) => {
+    easeAnimation();
+    setOpen(open === i ? null : i);
+  };
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 16 }}>
+    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 28 }}>
       {/* Care steps */}
-      <CareStepper steps={resident.careSteps} />
+      <CareStepper steps={careSteps} />
 
       {/* Summary + Memory combined */}
       <View style={{ backgroundColor: c.card, borderRadius: 8, borderWidth: 1, borderColor: c.border, padding: 16 }}>
@@ -246,8 +293,9 @@ function SituationTab({ resident }: { resident: ReturnType<typeof getResident> &
               }}>
                 <Feather name={v.icon as any} size={16} color={v.isAbnormal ? c.warning : c.mutedForeground} />
                 <Text style={{ flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14, color: c.foreground }}>{v.label}</Text>
-                <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 12, color: c.placeholder }}>baseline {v.base}</Text>
-                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 14, color: v.isAbnormal ? c.warning : c.success, minWidth: 56, textAlign: 'right' }}>
+                <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 12, color: c.placeholder }}>{v.base}</Text>
+                <TrendArrow base={v.base} current={v.current} isAbnormal={v.isAbnormal} />
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 14, color: v.isAbnormal ? c.warning : c.success, minWidth: 48, textAlign: 'right' }}>
                   {v.current}
                 </Text>
               </View>
@@ -269,7 +317,7 @@ function SituationTab({ resident }: { resident: ReturnType<typeof getResident> &
                 <View key={i} style={{ backgroundColor: c.card, borderRadius: 8, borderWidth: 1, borderColor: c.border, overflow: 'hidden' }}>
                   <TouchableOpacity
                     activeOpacity={0.7}
-                    onPress={() => setOpen(isOpen ? null : i)}
+                    onPress={() => handleToggleClarify(i)}
                     style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 8 }}
                   >
                     <Text style={{ flex: 1, fontFamily: 'Inter_500Medium', fontSize: 14, color: c.foreground }}>{q.question}</Text>
@@ -290,16 +338,134 @@ function SituationTab({ resident }: { resident: ReturnType<typeof getResident> &
       {/* Delegate Actions CTA */}
       <TouchableOpacity
         activeOpacity={0.85}
+        onPress={() => setDelegateOpen(true)}
         style={{
-          backgroundColor: c.primary, borderRadius: 4, height: 40,
+          backgroundColor: c.primary, borderRadius: 4, height: 44,
           flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-          marginTop: 8,
+          marginTop: 4,
         }}
       >
         <Feather name="send" size={16} color="#FFFFFF" />
         <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 14 }}>Delegate Actions</Text>
       </TouchableOpacity>
+
+      <DelegateModal
+        visible={delegateOpen}
+        residentName={resident.name}
+        onClose={() => setDelegateOpen(false)}
+        onConfirm={handleConfirmDelegate}
+      />
     </ScrollView>
+  );
+}
+
+/* ---------- TREND ARROW ---------- */
+
+function TrendArrow({ base, current, isAbnormal }: { base: string; current: string; isAbnormal: boolean }) {
+  const c = useColors();
+  // pull leading number from "120/80", "98.6", "180", etc.
+  const num = (s: string) => {
+    const m = s.match(/[-+]?\d+(?:\.\d+)?/);
+    return m ? parseFloat(m[0]) : NaN;
+  };
+  const b = num(base);
+  const v = num(current);
+  let icon: 'arrow-right' | 'arrow-up-right' | 'arrow-down-right' = 'arrow-right';
+  if (!isNaN(b) && !isNaN(v)) {
+    if (v > b) icon = 'arrow-up-right';
+    else if (v < b) icon = 'arrow-down-right';
+  }
+  return (
+    <Feather
+      name={icon}
+      size={14}
+      color={isAbnormal ? c.warning : c.placeholder}
+      style={{ marginHorizontal: 2 }}
+    />
+  );
+}
+
+/* ---------- DELEGATE MODAL ---------- */
+
+function DelegateModal({
+  visible, residentName, onClose, onConfirm,
+}: { visible: boolean; residentName: string; onClose: () => void; onConfirm: () => void }) {
+  const c = useColors();
+  const firstName = residentName.split(' ')[0];
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        onPress={onClose}
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      >
+        <Animated.View
+          entering={FadeIn.duration(180)}
+          exiting={FadeOut.duration(120)}
+          style={{ width: '100%', maxWidth: 380 }}
+        >
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: c.card, borderRadius: 16, padding: 24,
+              shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 24, shadowOffset: { width: 0, height: 8 },
+              elevation: 8,
+            }}
+          >
+            {/* Close */}
+            <TouchableOpacity
+              onPress={onClose}
+              hitSlop={8}
+              style={{ position: 'absolute', top: 14, right: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Feather name="x" size={18} color={c.mutedForeground} />
+            </TouchableOpacity>
+
+            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 22, color: c.foreground, marginBottom: 12 }}>
+              Delegate Reassessment
+            </Text>
+            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 22, color: c.mutedForeground, marginBottom: 20 }}>
+              Sage will message the charge nurse to perform a focused reassessment and request a full set of vitals.
+            </Text>
+
+            <View style={{ backgroundColor: c.background, borderRadius: 8, padding: 16, gap: 12, marginBottom: 24 }}>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 13, color: c.mutedForeground, width: 44 }}>To:</Text>
+                <Text style={{ flex: 1, fontFamily: 'Inter_500Medium', fontSize: 13, color: c.foreground }}>
+                  Sarah Jenkins, RN (Charge)
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 13, color: c.mutedForeground, width: 44 }}>Task:</Text>
+                <Text style={{ flex: 1, fontFamily: 'Inter_500Medium', fontSize: 13, color: c.foreground, lineHeight: 19 }}>
+                  Focus on mental status, lung sounds, and fresh vitals for {firstName}.
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              onPress={onConfirm}
+              activeOpacity={0.85}
+              style={{
+                backgroundColor: c.primary, borderRadius: 8, height: 48,
+                alignItems: 'center', justifyContent: 'center', marginBottom: 8,
+              }}
+            >
+              <Text style={{ color: '#FFFFFF', fontFamily: 'Inter_700Bold', fontSize: 15 }}>
+                Confirm Delegation
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={onClose}
+              activeOpacity={0.7}
+              style={{ height: 44, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Text style={{ color: c.mutedForeground, fontFamily: 'Inter_500Medium', fontSize: 14 }}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Animated.View>
+      </Pressable>
+    </Modal>
   );
 }
 

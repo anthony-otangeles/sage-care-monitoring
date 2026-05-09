@@ -66,7 +66,7 @@ export const residents: Resident[] = [
     image: require("@/assets/images/resident-1.png"),
     codeStatus: "DNR",
     latest: "Confusion ↑ overnight, possible UTI",
-    careSteps: { surveillance: "done", reassessment: "active", provider: "pending" },
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
     situation: {
       summary: "Mary Lou has exhibited increased confusion and restlessness over the past 14 hours. CNA reported strong urine odor. Vitals show mild tachycardia and low-grade temp. High suspicion for UTI-induced delirium given her history.",
       memory: "Admitted 6 weeks ago for sepsis secondary to UTI. Responds well to gentle redirection. Daughter (Sarah) visits on weekends.",
@@ -113,7 +113,7 @@ export const residents: Resident[] = [
     image: require("@/assets/images/resident-2.png"),
     codeStatus: "Full Code",
     latest: "Hip pain after evening fall",
-    careSteps: { surveillance: "done", reassessment: "active", provider: "done" },
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "done" },
     situation: {
       summary: "Walter had a witnessed fall yesterday evening. No obvious injuries, but complaining of left hip soreness this morning. Monitoring closely for delayed complications.",
       memory: "History of orthostatic hypotension. Prefers to mobilize independently despite recommendations.",
