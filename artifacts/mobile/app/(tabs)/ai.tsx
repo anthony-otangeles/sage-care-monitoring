@@ -276,14 +276,15 @@ export default function AIScreen() {
               SUGGESTED FOR YOU
             </Text>
           </View>
-          <ScrollView
+          <FlatList
+            data={remainingPrompts}
             horizontal
-            showsHorizontalScrollIndicator={false}
+            keyExtractor={p => p.id}
+            showsHorizontalScrollIndicator={Platform.OS === 'web'}
             contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
-          >
-            {remainingPrompts.map(p => (
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item: p }) => (
               <TouchableOpacity
-                key={p.id}
                 onPress={() => handlePromptTap(p)}
                 activeOpacity={0.7}
                 style={{
@@ -301,8 +302,8 @@ export default function AIScreen() {
                   {p.label}
                 </Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+            )}
+          />
         </Animated.View>
       )}
 
