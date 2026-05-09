@@ -40,7 +40,9 @@ export default function RosterScreen() {
       </View>
       <FlatList
         data={data}
-        keyExtractor={(item, idx) => 'isHeader' in item && item.isHeader ? `h-${item.title}` : `r-${(item as Resident).id}-${idx}`}
+        keyExtractor={item =>
+          'isHeader' in item && item.isHeader ? `h-${item.title}` : `r-${(item as Resident).id}`
+        }
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         renderItem={({ item }) => {
           if ('isHeader' in item && item.isHeader) {
@@ -72,17 +74,23 @@ export default function RosterScreen() {
             >
               <Image source={r.image} style={{ width: 44, height: 44, borderRadius: 22 }} contentFit="cover" />
               <View style={{ flex: 1 }}>
-                <Text style={{ color: c.foreground, fontFamily: 'Inter_700Bold', fontSize: 16, marginBottom: 2 }}>{r.name}</Text>
-                <Text style={{ color: c.mutedForeground, fontFamily: 'Inter_400Regular', fontSize: 12 }}>
-                  {r.age}{r.sex} · Room {r.room}
+                <Text style={{ color: c.foreground, fontFamily: 'Inter_700Bold', fontSize: 16, marginBottom: 4 }}>
+                  {r.name}
+                </Text>
+                <Text
+                  style={{ color: c.mutedForeground, fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 16 }}
+                  numberOfLines={2}
+                >
+                  {r.latest}
                 </Text>
               </View>
-              <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                {r.statusChips.map((s, i) => (
-                  <StatusChip key={i} variant={s as StatusVariant} label={s} />
-                ))}
-                <StatusChip variant={r.acuity} label={r.acuity} style="tag" />
-              </View>
+              {r.statusChips.length > 0 && (
+                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                  {r.statusChips.map((s, i) => (
+                    <StatusChip key={i} variant={s as StatusVariant} label={s} />
+                  ))}
+                </View>
+              )}
             </TouchableOpacity>
           );
         }}

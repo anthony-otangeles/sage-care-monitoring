@@ -2,6 +2,8 @@ import { ImageSourcePropType } from "react-native";
 
 export type AcuityLevel = "WATCHFUL" | "MONITORING" | "STABLE";
 
+export type CareStep = "done" | "active" | "pending";
+
 export interface Resident {
   id: string;
   name: string;
@@ -11,7 +13,10 @@ export interface Resident {
   acuity: AcuityLevel;
   statusChips: string[];
   image: ImageSourcePropType;
-  
+  codeStatus: "Full Code" | "DNR" | "DNR/DNI" | "Comfort Care";
+  latest: string;
+  careSteps: { surveillance: CareStep; reassessment: CareStep; provider: CareStep };
+
   situation: {
     summary: string;
     memory: string;
@@ -59,6 +64,9 @@ export const residents: Resident[] = [
     acuity: "WATCHFUL",
     statusChips: ["DECLINING"],
     image: require("@/assets/images/resident-1.png"),
+    codeStatus: "DNR",
+    latest: "Confusion ↑ overnight, possible UTI",
+    careSteps: { surveillance: "done", reassessment: "active", provider: "pending" },
     situation: {
       summary: "Mary Lou has exhibited increased confusion and restlessness over the past 14 hours. CNA reported strong urine odor. Vitals show mild tachycardia and low-grade temp. High suspicion for UTI-induced delirium given her history.",
       memory: "Admitted 6 weeks ago for sepsis secondary to UTI. Responds well to gentle redirection. Daughter (Sarah) visits on weekends.",
@@ -103,6 +111,9 @@ export const residents: Resident[] = [
     acuity: "WATCHFUL",
     statusChips: [],
     image: require("@/assets/images/resident-2.png"),
+    codeStatus: "Full Code",
+    latest: "Hip pain after evening fall",
+    careSteps: { surveillance: "done", reassessment: "active", provider: "done" },
     situation: {
       summary: "Walter had a witnessed fall yesterday evening. No obvious injuries, but complaining of left hip soreness this morning. Monitoring closely for delayed complications.",
       memory: "History of orthostatic hypotension. Prefers to mobilize independently despite recommendations.",
@@ -136,6 +147,9 @@ export const residents: Resident[] = [
     acuity: "MONITORING",
     statusChips: [],
     image: require("@/assets/images/resident-3.png"),
+    codeStatus: "DNR/DNI",
+    latest: "Finished antibiotics, lungs clear",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
     situation: {
       summary: "Elena completed her antibiotic course for pneumonia yesterday. Lungs sound clear, breathing is unlabored. Continuing to monitor for any rebound symptoms.",
       memory: "Speaks primarily Spanish. Enjoys listening to music in the afternoons.",
@@ -166,6 +180,9 @@ export const residents: Resident[] = [
     acuity: "MONITORING",
     statusChips: [],
     image: require("@/assets/images/resident-4.png"),
+    codeStatus: "Full Code",
+    latest: "Fasting BG 185, trending up",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
     situation: {
       summary: "Hiroshi's blood sugars have been slightly elevated over the past 48 hours (ranging 180-210). He has been requesting extra snacks in the evening.",
       memory: "Type 2 Diabetic, diet-controlled. Very social, participates in most activities.",
@@ -196,6 +213,9 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: require("@/assets/images/resident-5.png"),
+    codeStatus: "Full Code",
+    latest: "Attended exercise, no concerns",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
       summary: "Frank is resting comfortably. No acute concerns. Attended morning exercise class.",
       memory: "Former mechanic. Loves to talk about classic cars.",
@@ -222,6 +242,9 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: require("@/assets/images/resident-6.png"),
+    codeStatus: "Comfort Care",
+    latest: "Quiet night, eating well",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
       summary: "Doris had a quiet night. Appetite is good. No complaints of pain.",
       memory: "Avid reader. Usually requests fresh library books on Tuesdays.",

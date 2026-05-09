@@ -5,7 +5,7 @@ import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
-import { getResident } from '@/data/residents';
+import { getResident, CareStep } from '@/data/residents';
 import { StatusChip, StatusVariant } from '@/components/StatusChip';
 import { SageHeader } from '@/components/SageHeader';
 
@@ -43,43 +43,53 @@ export default function ResidentScreen() {
           <View style={{ width: 32 }} />
         </View>
 
-        {/* Profile */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 }}>
+        {/* Profile — full width */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingTop: 8, paddingBottom: 12 }}>
           <Image source={resident.image} style={{ width: 56, height: 56, borderRadius: 28 }} contentFit="cover" />
           <View style={{ flex: 1 }}>
             <Text style={{ color: c.foreground, fontFamily: 'Inter_700Bold', fontSize: 24, lineHeight: 28 }}>{resident.name}</Text>
             <Text style={{ color: c.mutedForeground, fontFamily: 'Inter_400Regular', fontSize: 12, marginTop: 4 }}>
-              MRN 0034-{resident.id.padStart(3, '0')} · {resident.age}{resident.sex} · Room {resident.room}
+              {resident.codeStatus} · {resident.age}{resident.sex} · Room {resident.room}
             </Text>
           </View>
-          <View style={{ alignItems: 'flex-end', gap: 4 }}>
-            {resident.statusChips.map((s, i) => <StatusChip key={i} variant={s as StatusVariant} label={s} />)}
-            <StatusChip variant={resident.acuity} label={resident.acuity} style="tag" />
-          </View>
+        </View>
+
+        {/* Chips row between profile and tabs */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 24, paddingBottom: 12 }}>
+          {resident.statusChips.map((s, i) => (
+            <StatusChip key={i} variant={s as StatusVariant} label={s} />
+          ))}
+          <StatusChip variant={resident.acuity} label={resident.acuity} />
         </View>
 
         {/* Segmented tabs */}
         <View style={{ flexDirection: 'row', paddingHorizontal: 16, gap: 4 }}>
-          {(['situation', 'talk', 'timeline'] as Tab[]).map(t => {
-            const active = t === tab;
+          {([
+            { key: 'situation', icon: 'activity' },
+            { key: 'talk', icon: 'message-circle' },
+            { key: 'timeline', icon: 'clock' },
+          ] as { key: Tab; icon: keyof typeof Feather.glyphMap }[]).map(({ key, icon }) => {
+            const active = key === tab;
             return (
               <TouchableOpacity
-                key={t}
-                onPress={() => setTab(t)}
+                key={key}
+                onPress={() => setTab(key)}
                 activeOpacity={0.7}
                 style={{
-                  flex: 1, alignItems: 'center', paddingVertical: 12,
+                  flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  paddingVertical: 12,
                   borderBottomWidth: 2,
                   borderBottomColor: active ? c.brand : 'transparent',
                 }}
               >
+                <Feather name={icon} size={14} color={active ? c.brand : c.mutedForeground} />
                 <Text style={{
                   fontFamily: active ? 'Inter_700Bold' : 'Inter_500Medium',
                   fontSize: 14, lineHeight: 16,
                   color: active ? c.foreground : c.mutedForeground,
                   textTransform: 'capitalize',
                 }}>
-                  {t}
+                  {key}
                 </Text>
               </TouchableOpacity>
             );
@@ -97,6 +107,71 @@ export default function ResidentScreen() {
   );
 }
 
+/* ---------- CARE STEPPER ---------- */
+
+function CareStepper({ steps }: { steps: { surveillance: CareStep; reassessment: CareStep; provider: CareStep } }) {
+  const c = useColors();
+  const items: { label: string; state: CareStep }[] = [
+    { label: 'Active Surveillance', state: steps.surveillance },
+    { label: 'Reassessment Pending', state: steps.reassessment },
+    { label: 'Provider Notified', state: steps.provider },
+  ];
+
+  const colorFor = (s: CareStep) =>
+    s === 'done' ? c.success : s === 'active' ? c.brand : c.borderStrong;
+  const bgFor = (s: CareStep) =>
+    s === 'done' ? c.success : s === 'active' ? c.brand : c.card;
+  const textFor = (s: CareStep) =>
+    s === 'pending' ? c.placeholder : c.foreground;
+
+  return (
+    <View style={{ backgroundColor: c.card, borderRadius: 8, borderWidth: 1, borderColor: c.border, padding: 16 }}>
+      <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.mutedForeground, marginBottom: 16 }}>
+        CARE STATUS
+      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+        {items.map((item, i) => (
+          <React.Fragment key={item.label}>
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <View style={{
+                width: 28, height: 28, borderRadius: 14,
+                borderWidth: 2, borderColor: colorFor(item.state),
+                backgroundColor: bgFor(item.state),
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                {item.state === 'done' ? (
+                  <Feather name="check" size={14} color="#FFFFFF" />
+                ) : item.state === 'active' ? (
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFFFFF' }} />
+                ) : (
+                  <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, color: c.placeholder }}>{i + 1}</Text>
+                )}
+              </View>
+              <Text
+                style={{
+                  marginTop: 8, textAlign: 'center',
+                  fontFamily: item.state === 'active' ? 'Inter_700Bold' : 'Inter_500Medium',
+                  fontSize: 11, lineHeight: 14,
+                  color: textFor(item.state),
+                  paddingHorizontal: 2,
+                }}
+              >
+                {item.label}
+              </Text>
+            </View>
+            {i < items.length - 1 && (
+              <View style={{
+                height: 2, flex: 0.6, marginTop: 13,
+                backgroundColor: items[i + 1].state !== 'pending' ? c.success : c.divider,
+              }} />
+            )}
+          </React.Fragment>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 /* ---------- SITUATION ---------- */
 
 function SituationTab({ resident }: { resident: ReturnType<typeof getResident> & {} }) {
@@ -105,7 +180,10 @@ function SituationTab({ resident }: { resident: ReturnType<typeof getResident> &
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 16 }}>
-      {/* Summary card */}
+      {/* Care steps */}
+      <CareStepper steps={resident.careSteps} />
+
+      {/* Summary + Memory combined */}
       <View style={{ backgroundColor: c.card, borderRadius: 8, borderWidth: 1, borderColor: c.border, padding: 16 }}>
         <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.mutedForeground, marginBottom: 8 }}>
           SUMMARY
@@ -113,18 +191,19 @@ function SituationTab({ resident }: { resident: ReturnType<typeof getResident> &
         <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 22, color: c.foreground }}>
           {resident.situation.summary}
         </Text>
-      </View>
 
-      {/* Memory card */}
-      <View style={{ backgroundColor: c.brandLight, borderRadius: 8, padding: 16, flexDirection: 'row', gap: 12 }}>
-        <Feather name="info" size={16} color={c.brand} style={{ marginTop: 2 }} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 12, color: c.brandText, marginBottom: 4 }}>
-            Memory
-          </Text>
-          <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 20, color: c.brandText }}>
-            {resident.situation.memory}
-          </Text>
+        <View style={{ height: 1, backgroundColor: c.divider, marginVertical: 16 }} />
+
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Feather name="info" size={14} color={c.brand} style={{ marginTop: 3 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.brandText, marginBottom: 4 }}>
+              MEMORY
+            </Text>
+            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 13, lineHeight: 20, color: c.mutedForeground }}>
+              {resident.situation.memory}
+            </Text>
+          </View>
         </View>
       </View>
 
