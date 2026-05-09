@@ -60,22 +60,14 @@ export default function ResidentScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
-      {/* Sticky top: SAGE pill + Profile + Tabs */}
+      {/* Sticky top: Profile + Tabs */}
       <View style={{
         backgroundColor: c.card,
-        paddingTop: insets.top + (Platform.OS === 'web' ? 60 : 8),
+        paddingTop: insets.top + (Platform.OS === 'web' ? 16 : 8),
         borderBottomWidth: 1, borderBottomColor: c.divider,
       }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16 }}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={8} style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}>
-            <Feather name="arrow-left" size={20} color={c.foreground} />
-          </TouchableOpacity>
-          <SageHeader />
-          <View style={{ width: 32 }} />
-        </View>
-
         {/* Profile — full width */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingTop: 8, paddingBottom: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 24, paddingTop: 4, paddingBottom: 12 }}>
           <Image source={resident.image} style={{ width: 56, height: 56, borderRadius: 28 }} contentFit="cover" />
           <View style={{ flex: 1 }}>
             <Text style={{ color: c.foreground, fontFamily: 'Inter_700Bold', fontSize: 24, lineHeight: 28 }}>{resident.name}</Text>
@@ -134,9 +126,30 @@ export default function ResidentScreen() {
           {tab === 'situation' && (
             <SituationTab resident={resident} careSteps={careSteps!} assignedNurse={assignedNurse} onDelegate={handleDelegate} />
           )}
-          {tab === 'talk' && <TalkTab resident={resident} insetsBottom={insets.bottom} />}
+          {tab === 'talk' && <TalkTab resident={resident} insetsBottom={0} />}
           {tab === 'timeline' && <TimelineTab resident={resident} />}
         </Animated.View>
+      </View>
+
+      {/* Persistent bottom nav: SAGE pill (left) + back (right) */}
+      <View style={{
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 + insets.bottom,
+        backgroundColor: c.card, borderTopWidth: 1, borderTopColor: c.divider,
+      }}>
+        <SageHeader />
+        <TouchableOpacity
+          onPress={() => router.back()}
+          hitSlop={8}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 6,
+            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+            backgroundColor: c.background, borderWidth: 1, borderColor: c.border,
+          }}
+        >
+          <Feather name="arrow-left" size={16} color={c.foreground} />
+          <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 13, color: c.foreground }}>Back</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
