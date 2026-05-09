@@ -141,13 +141,18 @@ export function MentionInput({ value, onChange, onSend, onMic, placeholder }: Me
 /* Render a message body with @mentions highlighted. Resident mentions are tappable. */
 export function MessageBody({ text, color, mentionColor }: { text: string; color: string; mentionColor: string }) {
   const router = useRouter();
-  const parts = text.split(/(@[A-Za-z][A-Za-z\-']*(?:\s[A-Z][A-Za-z\-']*)?)/g);
+  // Match @ followed by 1-4 capitalized words (allowing apostrophes, hyphens). Stops at lowercase or punctuation.
+  const parts = text.split(/(@[A-Z][A-Za-z\-']*(?:\s[A-Z][A-Za-z\-']*){0,3})/g);
   return (
     <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 20, color }}>
       {parts.map((p, i) => {
         if (!p.startsWith('@')) return <Text key={i}>{p}</Text>;
-        const name = p.slice(1).trim();
-        const match = residents.find(r => r.name.toLowerCase() === name.toLowerCase());
+        const mention = p.slice(1).trim().toLowerCase();
+        // Resolve by exact match first, then by prefix (e.g. "@Mary Lou" → "Mary Lou Smith"), then by first-name.
+        const match =
+          residents.find(r => r.name.toLowerCase() === mention) ||
+          residents.find(r => r.name.toLowerCase().startsWith(mention + ' ')) ||
+          residents.find(r => r.name.toLowerCase().split(' ')[0] === mention);
         if (match) {
           return (
             <Text
@@ -155,7 +160,7 @@ export function MessageBody({ text, color, mentionColor }: { text: string; color
               onPress={(e: any) => { e?.stopPropagation?.(); router.push(`/resident/${match.id}`); }}
               style={{ color: mentionColor, fontFamily: 'Inter_600SemiBold', textDecorationLine: 'underline' }}
             >
-              {p}
+              @{match.name}
             </Text>
           );
         }
