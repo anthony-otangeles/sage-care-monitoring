@@ -238,7 +238,7 @@ export default function AIScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.success }} />
             <Text style={{ color: c.mutedForeground, fontSize: 11, fontFamily: 'Inter_500Medium' }}>
-              Continuously monitoring 12 residents
+              Continuously monitoring 30 residents
             </Text>
           </View>
         </View>
@@ -354,7 +354,7 @@ function BriefingCard() {
       </Text>
 
       <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 22, color: c.foreground }}>
-        I'm actively monitoring <Text style={{ fontFamily: 'Inter_700Bold' }}>12 residents</Text> across East and West Hall.
+        I'm actively monitoring <Text style={{ fontFamily: 'Inter_700Bold' }}>30 residents</Text> across East and West Hall.
       </Text>
 
       {/* Attention callout */}

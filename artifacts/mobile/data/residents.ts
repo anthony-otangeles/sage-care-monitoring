@@ -448,6 +448,395 @@ export const residents: Resident[] = [
     talk: [
       { id: "m1", sender: "sage", text: "Consider dietitian consult and BMP recheck." }
     ]
+  },
+  {
+    id: "13",
+    name: "Margaret O'Sullivan",
+    age: 86, sex: "F", room: "205A",
+    acuity: "MONITORING",
+    statusChips: [],
+    image: require("@/assets/images/resident-1.png"),
+    codeStatus: "DNR",
+    latest: "Mild dehydration, encouraging fluids",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
+    situation: {
+      summary: "Margaret's intake has been below baseline for 2 days. Skin turgor mildly decreased. Encouraging q1h fluids.",
+      memory: "Hx mild dementia. Loves classical music in the afternoons.",
+      concerns: [{ title: "Hydration", status: "WATCHING", color: "amber" }],
+      vitals: [
+        { label: "Heart Rate", icon: "activity", base: "74", current: "82", isAbnormal: false },
+        { label: "Blood Pressure", icon: "heart", base: "118/68", current: "112/64", isAbnormal: false }
+      ],
+      clarify: []
+    },
+    timeline: [
+      { id: "t1", timeAgo: "2 HOURS AGO", period: "MORNING", icon: "droplet", text: "Took 240 mL water with breakfast." }
+    ],
+    talk: [{ id: "m1", sender: "sage", text: "Hydration trend slowly improving." }]
+  },
+  {
+    id: "14",
+    name: "Henry Brennan",
+    age: 73, sex: "M", room: "207",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-2.png"),
+    codeStatus: "Full Code",
+    latest: "Stable post-knee replacement day 14",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Day 14 post right TKA. Ambulating with walker. Pain controlled on PRN Tylenol.",
+      memory: "Retired carpenter. Eager to return home. Wife visits daily.",
+      concerns: [],
+      vitals: [{ label: "Heart Rate", icon: "activity", base: "72", current: "74", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "3 HOURS AGO", period: "MORNING", icon: "check-circle", text: "PT session completed, 200 ft ambulation." }],
+    talk: [{ id: "m1", sender: "sage", text: "Recovery progressing well." }]
+  },
+  {
+    id: "15",
+    name: "Yolanda Pierce",
+    age: 91, sex: "F", room: "210B",
+    acuity: "MONITORING",
+    statusChips: [],
+    image: require("@/assets/images/resident-5.png"),
+    codeStatus: "DNR",
+    latest: "Pressure injury healing, repositioning q2h",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "done" },
+    situation: {
+      summary: "Stage 2 sacral pressure injury improving. Wound nurse following weekly. Repositioning q2h.",
+      memory: "Bedbound. Loves visits from therapy dog program.",
+      concerns: [{ title: "Skin Integrity", status: "MONITORING", color: "amber" }],
+      vitals: [{ label: "Heart Rate", icon: "activity", base: "76", current: "78", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "1 HOUR AGO", period: "MORNING", icon: "refresh-cw", text: "Repositioned to right side." }],
+    talk: [{ id: "m1", sender: "sage", text: "Wound granulating well." }]
+  },
+  {
+    id: "16",
+    name: "Clarence Boudreaux",
+    age: 82, sex: "M", room: "212",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-4.png"),
+    codeStatus: "DNR",
+    latest: "COPD stable on home O2",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "COPD stable. SpO2 94% on 2L NC. No new dyspnea.",
+      memory: "Former jazz musician from New Orleans. Tells great stories.",
+      concerns: [],
+      vitals: [
+        { label: "Heart Rate", icon: "activity", base: "84", current: "82", isAbnormal: false },
+        { label: "Temperature", icon: "thermometer", base: "98.4°", current: "98.2°", isAbnormal: false }
+      ],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "5 HOURS AGO", period: "MORNING", icon: "wind", text: "SpO2 94% on 2L." }],
+    talk: [{ id: "m1", sender: "sage", text: "Respiratory status stable." }]
+  },
+  {
+    id: "17",
+    name: "Pearl Robinson",
+    age: 89, sex: "F", room: "214A",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-1.png"),
+    codeStatus: "DNR",
+    latest: "Cheerful, attended bingo",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Pleasant interaction at breakfast. Independent with ADLs except bathing.",
+      memory: "Retired schoolteacher. 4 great-grandchildren.",
+      concerns: [],
+      vitals: [{ label: "Blood Pressure", icon: "heart", base: "124/72", current: "126/74", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "2 HOURS AGO", period: "MORNING", icon: "smile", text: "Won bingo round." }],
+    talk: [{ id: "m1", sender: "sage", text: "Pearl is doing wonderfully today." }]
+  },
+  {
+    id: "18",
+    name: "Vincent Kowalski",
+    age: 76, sex: "M", room: "216B",
+    acuity: "MONITORING",
+    statusChips: [],
+    image: require("@/assets/images/resident-2.png"),
+    codeStatus: "Full Code",
+    latest: "Post-stroke rehab, mild left weakness",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
+    situation: {
+      summary: "3 weeks post-CVA. Left arm 3/5 strength. Aggressive PT/OT plan.",
+      memory: "Retired engineer. Highly motivated in therapy.",
+      concerns: [{ title: "Mobility", status: "MONITORING", color: "amber" }],
+      vitals: [{ label: "Blood Pressure", icon: "heart", base: "138/82", current: "142/86", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "4 HOURS AGO", period: "MORNING", icon: "activity", text: "OT session, gripping exercises." }],
+    talk: [{ id: "m1", sender: "sage", text: "Steady progress noted." }]
+  },
+  {
+    id: "19",
+    name: "Adelaide Fontaine",
+    age: 94, sex: "F", room: "218",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-5.png"),
+    codeStatus: "Comfort Care",
+    latest: "Comfortable, no acute concerns",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Comfortable on routine comfort meds. Sleeps most of day. Family aware.",
+      memory: "French is her first language. Smiles when read to.",
+      concerns: [],
+      vitals: [{ label: "Heart Rate", icon: "activity", base: "68", current: "70", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "6 HOURS AGO", period: "MORNING", icon: "moon", text: "Slept comfortably overnight." }],
+    talk: [{ id: "m1", sender: "sage", text: "Adelaide is peaceful." }]
+  },
+  {
+    id: "20",
+    name: "Reginald Thompson",
+    age: 80, sex: "M", room: "220A",
+    acuity: "WATCHFUL",
+    statusChips: ["NEW"],
+    image: require("@/assets/images/resident-4.png"),
+    codeStatus: "Full Code",
+    latest: "New admit — CHF exacerbation",
+    careSteps: { surveillance: "active", reassessment: "active", provider: "done" },
+    situation: {
+      summary: "Admitted yesterday from hospital after CHF exacerbation. Lasix titrating. Daily weights ordered.",
+      memory: "Lives alone. Daughter is POA. Loves baseball.",
+      concerns: [
+        { title: "Fluid Overload", status: "ACTIVE", color: "coral" },
+        { title: "Daily Weights", status: "MONITORING", color: "amber" }
+      ],
+      vitals: [
+        { label: "Heart Rate", icon: "activity", base: "82", current: "94", isAbnormal: true },
+        { label: "Blood Pressure", icon: "heart", base: "128/78", current: "118/72", isAbnormal: false }
+      ],
+      clarify: [{ question: "Weight today?", answer: "Down 0.6 kg from yesterday — diuresis working." }]
+    },
+    timeline: [
+      { id: "t1", timeAgo: "1 HOUR AGO", period: "MORNING", icon: "trending-down", text: "AM weight 78.4 kg, down 0.6 kg." }
+    ],
+    talk: [{ id: "m1", sender: "sage", text: "Diuresis on track. Watching K+ next draw." }]
+  },
+  {
+    id: "21",
+    name: "Lillian Greco",
+    age: 87, sex: "F", room: "221B",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-1.png"),
+    codeStatus: "DNR",
+    latest: "Stable, enjoying garden visits",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Pleasant. Independent ambulation with cane. Eats 80%+ of meals.",
+      memory: "Avid gardener. Family brings cuttings to her room.",
+      concerns: [],
+      vitals: [{ label: "Heart Rate", icon: "activity", base: "72", current: "74", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "3 HOURS AGO", period: "MORNING", icon: "sun", text: "Walked outside in courtyard." }],
+    talk: [{ id: "m1", sender: "sage", text: "Lillian is thriving." }]
+  },
+  {
+    id: "22",
+    name: "Theodore Whitman",
+    age: 75, sex: "M", room: "223",
+    acuity: "MONITORING",
+    statusChips: [],
+    image: require("@/assets/images/resident-2.png"),
+    codeStatus: "Full Code",
+    latest: "Diabetes management, sliding scale insulin",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "done" },
+    situation: {
+      summary: "Type 2 DM on sliding scale. Recent BG trending high mid-morning. Endocrine consult pending.",
+      memory: "Retired accountant. Tracks his own BG religiously.",
+      concerns: [{ title: "Glucose Control", status: "TRENDING", color: "amber" }],
+      vitals: [{ label: "Heart Rate", icon: "activity", base: "76", current: "78", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "2 HOURS AGO", period: "MORNING", icon: "trending-up", text: "BG 198 ac lunch." }],
+    talk: [{ id: "m1", sender: "sage", text: "BG pattern suggests sliding scale adjustment." }]
+  },
+  {
+    id: "23",
+    name: "Geraldine Park",
+    age: 83, sex: "F", room: "225A",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-5.png"),
+    codeStatus: "DNR",
+    latest: "Stable post-pneumonia recovery",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Completed antibiotics 3 days ago. Lung sounds clear. Energy returning.",
+      memory: "Korean is first language. Loves video calls with grandchildren in Seoul.",
+      concerns: [],
+      vitals: [
+        { label: "Temperature", icon: "thermometer", base: "98.4°", current: "98.6°", isAbnormal: false }
+      ],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "4 HOURS AGO", period: "MORNING", icon: "check-circle", text: "Lung sounds clear bilaterally." }],
+    talk: [{ id: "m1", sender: "sage", text: "Recovery on track." }]
+  },
+  {
+    id: "24",
+    name: "Mortimer Hayes",
+    age: 78, sex: "M", room: "226B",
+    acuity: "MONITORING",
+    statusChips: [],
+    image: require("@/assets/images/resident-3.png"),
+    codeStatus: "DNR/DNI",
+    latest: "Parkinson's, increased rigidity AM",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
+    situation: {
+      summary: "Increased AM rigidity, possibly related to med timing. Neuro consult on radar.",
+      memory: "Retired professor. Enjoys jazz LPs in his room.",
+      concerns: [{ title: "Med Timing", status: "MONITORING", color: "amber" }],
+      vitals: [{ label: "Heart Rate", icon: "activity", base: "70", current: "72", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "2 HOURS AGO", period: "MORNING", icon: "alert-circle", text: "Slow to respond, more rigid than baseline." }],
+    talk: [{ id: "m1", sender: "sage", text: "Recommend reviewing carbidopa-levodopa schedule." }]
+  },
+  {
+    id: "25",
+    name: "Rosalind Mercado",
+    age: 85, sex: "F", room: "228",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-1.png"),
+    codeStatus: "DNR",
+    latest: "Stable, ate full breakfast",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Independent in most ADLs. Pleasant and engaged. No new concerns.",
+      memory: "Tagalog is preferred language. Catholic, attends weekly Mass.",
+      concerns: [],
+      vitals: [{ label: "Blood Pressure", icon: "heart", base: "122/72", current: "120/70", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "3 HOURS AGO", period: "MORNING", icon: "coffee", text: "Ate 100% breakfast." }],
+    talk: [{ id: "m1", sender: "sage", text: "Rosalind is doing very well." }]
+  },
+  {
+    id: "26",
+    name: "Augustus Calloway",
+    age: 81, sex: "M", room: "230A",
+    acuity: "WATCHFUL",
+    statusChips: ["DECLINING"],
+    image: require("@/assets/images/resident-4.png"),
+    codeStatus: "DNR",
+    latest: "Anorexia, declining intake third day",
+    careSteps: { surveillance: "active", reassessment: "active", provider: "pending" },
+    situation: {
+      summary: "Third day of poor intake (<25%). No GI symptoms. Mood withdrawn. Considering depression vs medical workup.",
+      memory: "Korean War veteran. Usually social, recent withdrawal noted.",
+      concerns: [
+        { title: "Poor PO Intake", status: "ACTIVE", color: "coral" },
+        { title: "Mood Change", status: "WATCHING", color: "amber" }
+      ],
+      vitals: [{ label: "Blood Pressure", icon: "heart", base: "126/76", current: "112/64", isAbnormal: true }],
+      clarify: [{ question: "Recent losses?", answer: "Wife passed 6 weeks ago." }]
+    },
+    timeline: [{ id: "t1", timeAgo: "5 HOURS AGO", period: "MORNING", icon: "alert-triangle", text: "Refused breakfast." }],
+    talk: [{ id: "m1", sender: "sage", text: "Recommend social work and provider consult." }]
+  },
+  {
+    id: "27",
+    name: "Wilhelmina Dietrich",
+    age: 90, sex: "F", room: "231B",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-5.png"),
+    codeStatus: "DNR",
+    latest: "Stable, knitting in common room",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Pleasant, social. Enjoys knitting circle three times weekly.",
+      memory: "Born in Germany, immigrated 1956. Speaks German with one staff member.",
+      concerns: [],
+      vitals: [{ label: "Heart Rate", icon: "activity", base: "70", current: "72", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "2 HOURS AGO", period: "MORNING", icon: "smile", text: "Knitting circle this morning." }],
+    talk: [{ id: "m1", sender: "sage", text: "Wilhelmina is content and well." }]
+  },
+  {
+    id: "28",
+    name: "Bernard Achebe",
+    age: 79, sex: "M", room: "233",
+    acuity: "MONITORING",
+    statusChips: [],
+    image: require("@/assets/images/resident-2.png"),
+    codeStatus: "Full Code",
+    latest: "Anticoagulation INR 3.4, slightly elevated",
+    careSteps: { surveillance: "active", reassessment: "pending", provider: "done" },
+    situation: {
+      summary: "On warfarin for AFib. Recent INR 3.4 (target 2-3). Held last dose, rechecking AM.",
+      memory: "Retired physician. Educates staff on his own conditions.",
+      concerns: [{ title: "INR Trending Up", status: "MONITORING", color: "amber" }],
+      vitals: [{ label: "Heart Rate", icon: "activity", base: "78", current: "80", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "6 HOURS AGO", period: "MORNING", icon: "alert-circle", text: "INR 3.4, warfarin held." }],
+    talk: [{ id: "m1", sender: "sage", text: "Recheck INR scheduled tomorrow." }]
+  },
+  {
+    id: "29",
+    name: "Estelle Chamberlain",
+    age: 86, sex: "F", room: "235A",
+    acuity: "STABLE",
+    statusChips: [],
+    image: require("@/assets/images/resident-1.png"),
+    codeStatus: "DNR",
+    latest: "Stable, scheduled hair appointment today",
+    careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
+    situation: {
+      summary: "Pleasant. Looking forward to in-house salon visit. No concerns.",
+      memory: "Former model in the 1960s. Particular about her appearance.",
+      concerns: [],
+      vitals: [{ label: "Blood Pressure", icon: "heart", base: "120/70", current: "118/72", isAbnormal: false }],
+      clarify: []
+    },
+    timeline: [{ id: "t1", timeAgo: "1 HOUR AGO", period: "MORNING", icon: "smile", text: "Excited for hair appt at 1pm." }],
+    talk: [{ id: "m1", sender: "sage", text: "Estelle is in great spirits." }]
+  },
+  {
+    id: "30",
+    name: "Solomon Kapoor",
+    age: 77, sex: "M", room: "236B",
+    acuity: "WATCHFUL",
+    statusChips: ["NEW"],
+    image: require("@/assets/images/resident-3.png"),
+    codeStatus: "Full Code",
+    latest: "New admit — post-op hip ORIF day 3",
+    careSteps: { surveillance: "active", reassessment: "active", provider: "done" },
+    situation: {
+      summary: "Day 3 post-ORIF for left hip fx. Pain 4/10 on PCA. PT consult started today. Watching for VTE signs.",
+      memory: "Vegetarian. Daughter coordinating care from out of state.",
+      concerns: [
+        { title: "Post-op Pain", status: "ACTIVE", color: "coral" },
+        { title: "VTE Risk", status: "MONITORING", color: "amber" }
+      ],
+      vitals: [
+        { label: "Heart Rate", icon: "activity", base: "76", current: "88", isAbnormal: false },
+        { label: "Temperature", icon: "thermometer", base: "98.4°", current: "99.1°", isAbnormal: false }
+      ],
+      clarify: [{ question: "VTE prophylaxis?", answer: "On enoxaparin and SCDs." }]
+    },
+    timeline: [
+      { id: "t1", timeAgo: "1 HOUR AGO", period: "MORNING", icon: "activity", text: "PT eval — bedside, dangled at edge." }
+    ],
+    talk: [{ id: "m1", sender: "sage", text: "Recovery on expected post-op trajectory." }]
   }
 ];
 
