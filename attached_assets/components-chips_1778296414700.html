@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Status Chips</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html,body{margin:0;padding:0;background:#FFFFFF;font-family:Inter;color:#1C192E}
+  body{padding:24px 28px}
+  h3{margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#6A7282}
+  p.hint{margin:0 0 14px;font-size:12px;color:#99A1AF;max-width:640px}
+  section{margin-bottom:28px}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  /* Solid status pill — matches Figma Property1=TO DO / SIGNED / PENDING / etc.
+     Figma spec: radius 5, padding 4/8, Inter 10px, white text, 100% line-height,
+     uppercase, letter-spacing normal. Width is content-driven (Figma bakes in
+     fixed widths per label, which we approximate with padding). */
+  .pill{
+    display:inline-flex;align-items:center;justify-content:center;
+    height:20px;padding:4px 8px;border-radius:5px;
+    font-family:Inter;font-size:10px;line-height:100%;font-weight:400;
+    color:#FFFFFF;white-space:nowrap;letter-spacing:0;
+  }
+  .pill--todo     {background:rgb(41,187,137)}   /* mint  */
+  .pill--forreview{background:rgb(255,150,113)}  /* peach */
+  .pill--forsigning,.pill--pending{background:rgb(233,192,95)} /* gold */
+  .pill--signed,.pill--voided{background:rgb(195,74,125)}      /* pink */
+  .pill--reviewed {background:rgb(94,97,230)}    /* indigo */
+  .pill--done     {background:rgb(0,129,207)}    /* blue  */
+  .pill--success  {background:rgb(41,187,137)}   /* mint  */
+  .pill--disregard{background:rgb(153,161,175)}  /* gray  */
+
+  /* Soft bordered tag — matches Figma Property1=Action Taken / Under Review.
+     Figma spec: radius 4, 1px colored border, tinted fill, Inter 12px sentence
+     case, 100% line-height, height 23, padding 4/8. */
+  .tag{
+    display:inline-flex;align-items:center;justify-content:center;
+    padding:3px 8px;border-radius:4px;
+    font-family:Inter;font-size:12px;line-height:15px;font-weight:400;
+    white-space:nowrap;border:1px solid transparent;
+  }
+  .tag--mint  {background:rgb(227,245,239);border-color:rgb(41,187,137);color:rgb(41,187,137)}
+  .tag--blue  {background:rgb(238,246,250);border-color:rgb(0,129,207);color:rgb(0,129,207)}
+  .tag--peach {background:rgb(255,243,239);border-color:rgb(255,150,113);color:rgb(255,150,113)}
+  .tag--gold  {background:rgb(253,247,230);border-color:rgb(233,192,95);color:rgb(183,140,50)}
+  .tag--pink  {background:rgb(255,243,248);border-color:rgb(195,74,125);color:rgb(195,74,125)}
+  .tag--violet{background:rgb(240,240,252);border-color:rgb(94,97,230);color:rgb(94,97,230)}
+  .tag--gray  {background:rgb(245,246,247);border-color:rgb(153,161,175);color:rgb(107,114,128)}
+</style>
+</head>
+<body>
+
+<section>
+  <h3>Status pills — encounter / document / order workflow</h3>
+  <p class="hint">Solid brand color, white 10px Inter caps, 5px radius. Width hugs the label. Source: <code>Property1=TO DO … Property1=DISREGARD</code>.</p>
+  <div class="row">
+    <span class="pill pill--todo">TO DO</span>
+    <span class="pill pill--forreview">FOR REVIEW</span>
+    <span class="pill pill--forsigning">FOR SIGNING</span>
+    <span class="pill pill--signed">SIGNED</span>
+    <span class="pill pill--reviewed">REVIEWED</span>
+    <span class="pill pill--done">DONE</span>
+    <span class="pill pill--disregard">DISREGARD</span>
+    <span class="pill pill--pending">PENDING</span>
+    <span class="pill pill--voided">VOIDED</span>
+    <span class="pill pill--success">SUCCESS</span>
+  </div>
+</section>
+
+<section>
+  <h3>Soft tags — row / item badges</h3>
+  <p class="hint">12px Inter sentence case, 4px radius, 1px colored border, tinted fill. Used inline on list rows and detail panels. Source: <code>Property1=Action Taken</code>, <code>Property1=Under Review</code>.</p>
+  <div class="row">
+    <span class="tag tag--mint">Action Taken</span>
+    <span class="tag tag--blue">Under Review</span>
+    <span class="tag tag--peach">Scheduled a visit</span>
+    <span class="tag tag--gold">Awaiting labs</span>
+    <span class="tag tag--pink">Missing CPT</span>
+    <span class="tag tag--violet">Flagged</span>
+    <span class="tag tag--gray">Disregarded</span>
+  </div>
+</section>
+
+</body>
+</html>

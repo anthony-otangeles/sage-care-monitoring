@@ -1,0 +1,162 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;padding:24px 28px;background:#fff;font-family:Inter;color:#1C192E}
+  .section{margin-bottom:18px}
+  .section:last-child{margin-bottom:0}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .lbl{font-size:11px;color:#6A7282;font-family:JetBrains Mono;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+
+  /* All buttons — Figma spec: Inter 700 / 14px / lh 100% / radius 4 / h 40 */
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    height:40px;padding:10px 18px;border-radius:4px;border:1px solid transparent;
+    font-family:Inter;font-weight:700;font-size:14px;line-height:1;
+    cursor:pointer;box-sizing:border-box;
+    transition:background 150ms ease-out, border-color 150ms ease-out;
+  }
+  .btn:focus{outline:none}
+  /* Lucide icon default: 16px, inherits currentColor from the button */
+  .btn svg{width:16px;height:16px;stroke:currentColor;stroke-width:2;
+    stroke-linecap:round;stroke-linejoin:round;fill:none;flex-shrink:0}
+
+  /* Primary action — mint, white text (Figma: Property 1=Default #00C9A7) */
+  .btn--primary{background:#00C9A7;color:#fff}
+  .btn--primary:hover{background:#00B798}
+  .btn--primary[disabled]{background:#E5E7EB;color:#99A1AF;cursor:not-allowed}
+
+  /* Secondary — white, slate border, slate text */
+  .btn--cancel{background:#fff;color:#6A7282;border-color:#D1D5DC;min-width:88px}
+  .btn--cancel:hover{background:#F8F8F8}
+
+  /* Destructive — error color */
+  .btn--danger{background:#C34A7D;color:#fff}
+  .btn--danger:hover{background:#A63F6B}
+</style>
+</head>
+<body>
+
+<div class="section">
+  <div class="lbl">Primary · Add</div>
+  <div class="row">
+    <button class="btn btn--primary">
+      <i data-lucide="plus"></i> Add Patient
+    </button>
+    <button class="btn btn--primary">
+      <i data-lucide="calendar-plus"></i> Add Shift
+    </button>
+    <button class="btn btn--primary">
+      <i data-lucide="file-plus"></i> New Note
+    </button>
+  </div>
+</div>
+
+<div class="section">
+  <div class="lbl">Primary · Stateful verbs</div>
+  <div class="row">
+    <button class="btn btn--primary" style="min-width:140px">
+      <i data-lucide="log-in"></i> Check In
+    </button>
+    <button class="btn btn--primary" style="min-width:140px">
+      <i data-lucide="log-out"></i> Check Out
+    </button>
+    <button class="btn btn--primary">
+      <i data-lucide="send"></i> Submit
+    </button>
+    <button class="btn btn--primary">
+      <i data-lucide="check"></i> Sign &amp; Complete
+    </button>
+    <button class="btn btn--primary" disabled>
+      <i data-lucide="log-in"></i> Check In
+    </button>
+  </div>
+</div>
+
+<div class="section">
+  <div class="lbl">Primary · AI / generation</div>
+  <div class="row">
+    <button class="btn btn--primary">
+      <i data-lucide="sparkles"></i> Generate
+    </button>
+    <button class="btn btn--primary">
+      <i data-lucide="mic"></i> Start Dictation
+    </button>
+    <button class="btn btn--primary">
+      <i data-lucide="search"></i> Search Patient
+    </button>
+  </div>
+</div>
+
+<div class="section">
+  <div class="lbl">Secondary · Neutral actions</div>
+  <div class="row">
+    <button class="btn btn--cancel">
+      <i data-lucide="x"></i> Cancel
+    </button>
+    <button class="btn btn--cancel">
+      <i data-lucide="x"></i> Dismiss
+    </button>
+    <button class="btn btn--cancel">
+      <i data-lucide="arrow-left"></i> Return to Scriber
+    </button>
+    <button class="btn btn--cancel">
+      <i data-lucide="edit-3"></i> Edit
+    </button>
+    <button class="btn btn--cancel">
+      <i data-lucide="paperclip"></i> Attach File
+    </button>
+    <button class="btn btn--cancel">
+      <i data-lucide="filter"></i> Filter
+    </button>
+  </div>
+</div>
+
+<div class="section">
+  <div class="lbl">Destructive</div>
+  <div class="row">
+    <button class="btn btn--danger">
+      <i data-lucide="trash-2"></i> Delete
+    </button>
+    <button class="btn btn--danger">
+      <i data-lucide="x-circle"></i> Void Encounter
+    </button>
+  </div>
+</div>
+
+<div class="section">
+  <div class="lbl">Paired · modal footer (gap 12, padding 24·32)</div>
+  <div class="row" style="border:1px solid #EEEEEE;padding:24px 32px;justify-content:flex-end;max-width:600px;border-radius:8px">
+    <button class="btn btn--cancel"><i data-lucide="x"></i> Cancel</button>
+    <button class="btn btn--primary" style="min-width:140px"><i data-lucide="send"></i> Submit</button>
+  </div>
+</div>
+
+<div class="section">
+  <div class="lbl">Icon mapping cheat sheet</div>
+  <div class="row" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 20px;font-size:12px;color:#6A7282;font-family:JetBrains Mono">
+    <div><i data-lucide="plus" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  add / new <span style="color:#99A1AF">→ plus, file-plus</span></div>
+    <div><i data-lucide="send" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  submit / send <span style="color:#99A1AF">→ send</span></div>
+    <div><i data-lucide="check" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  confirm / sign <span style="color:#99A1AF">→ check</span></div>
+    <div><i data-lucide="x" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  cancel / dismiss <span style="color:#99A1AF">→ x</span></div>
+    <div><i data-lucide="arrow-left" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  back / return <span style="color:#99A1AF">→ arrow-left</span></div>
+    <div><i data-lucide="trash-2" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  delete <span style="color:#99A1AF">→ trash-2</span></div>
+    <div><i data-lucide="edit-3" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  edit <span style="color:#99A1AF">→ edit-3</span></div>
+    <div><i data-lucide="log-in" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  check in <span style="color:#99A1AF">→ log-in</span></div>
+    <div><i data-lucide="log-out" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  check out <span style="color:#99A1AF">→ log-out</span></div>
+    <div><i data-lucide="sparkles" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  generate / AI <span style="color:#99A1AF">→ sparkles</span></div>
+    <div><i data-lucide="mic" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  dictate <span style="color:#99A1AF">→ mic</span></div>
+    <div><i data-lucide="search" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  search / find <span style="color:#99A1AF">→ search</span></div>
+    <div><i data-lucide="filter" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  filter <span style="color:#99A1AF">→ filter</span></div>
+    <div><i data-lucide="paperclip" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  attach <span style="color:#99A1AF">→ paperclip</span></div>
+    <div><i data-lucide="x-circle" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  void <span style="color:#99A1AF">→ x-circle</span></div>
+    <div><i data-lucide="calendar-plus" style="width:14px;height:14px;vertical-align:-2px;color:#1C192E"></i>  schedule <span style="color:#99A1AF">→ calendar-plus</span></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script>lucide.createIcons({ attrs: { 'stroke-width': 2 } });</script>
+</body>
+</html>

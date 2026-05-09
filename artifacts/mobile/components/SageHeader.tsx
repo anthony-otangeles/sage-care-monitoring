@@ -1,10 +1,10 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence, Easing } from 'react-native-reanimated';
 import { useColors } from '@/hooks/useColors';
 
 export function SageHeader() {
-  const colors = useColors();
+  const c = useColors();
   const opacity = useSharedValue(0.4);
 
   useEffect(() => {
@@ -18,41 +18,23 @@ export function SageHeader() {
     );
   }, []);
 
-  const dotStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-  }));
+  const dotStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
   return (
-    <View style={styles.container}>
-      <View style={[styles.pill, { backgroundColor: 'rgba(255,255,255,0.7)', borderColor: colors.border, borderWidth: 1 }]}>
-        <Animated.View style={[styles.dot, { backgroundColor: colors.accent }, dotStyle]} />
-        <Text style={[styles.text, { color: colors.foreground }]}>SAGE IS LISTENING</Text>
+    <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+      <View style={{
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        paddingHorizontal: 10, paddingVertical: 5, borderRadius: 100,
+        backgroundColor: c.brandLight, borderWidth: 1, borderColor: c.border,
+      }}>
+        <Animated.View style={[{ width: 6, height: 6, borderRadius: 3, backgroundColor: c.brand }, dotStyle]} />
+        <Text style={{
+          fontFamily: 'Inter_600SemiBold', fontSize: 10, letterSpacing: 0.5,
+          color: c.brandText,
+        }}>
+          SAGE IS LISTENING
+        </Text>
       </View>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 100,
-    gap: 6,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  text: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 10,
-    letterSpacing: 0.5,
-  }
-});
