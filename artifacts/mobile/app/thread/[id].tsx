@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo } from 'react';
-import { View, Text, FlatList, TouchableOpacity, Platform, KeyboardAvoidingView } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, Platform, KeyboardAvoidingView, Modal, Pressable, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -36,6 +36,8 @@ export default function ThreadScreen() {
 
   const [messages, setMessages] = useState<ThreadMessage[]>(baseThread?.messages ?? []);
   const [draft, setDraft] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sheet, setSheet] = useState<null | 'summary' | 'transcription' | 'insight'>(null);
   const listRef = useRef<FlatList<ThreadMessage>>(null);
 
   if (!baseThread) {
@@ -104,7 +106,21 @@ export default function ThreadScreen() {
         <TouchableOpacity hitSlop={6} style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }}>
           <Feather name="video" size={18} color={c.foreground} />
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => setMenuOpen(true)} hitSlop={6} style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }}>
+          <Feather name="more-vertical" size={20} color={c.foreground} />
+        </TouchableOpacity>
       </View>
+
+      <ThreadMenu
+        visible={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onPick={(k) => { setMenuOpen(false); setTimeout(() => setSheet(k), 80); }}
+      />
+      <ThreadInsightSheet
+        kind={sheet}
+        title={baseThread.title}
+        onClose={() => setSheet(null)}
+      />
 
       <FlatList
         ref={listRef}
@@ -162,8 +178,144 @@ export default function ThreadScreen() {
         value={draft}
         onChange={setDraft}
         onSend={send}
+        onMic={() => {}}
         placeholder="Message... type @ to tag a resident"
       />
     </KeyboardAvoidingView>
+  );
+}
+
+function ThreadMenu({
+  visible, onClose, onPick,
+}: { visible: boolean; onClose: () => void; onPick: (k: 'summary' | 'transcription' | 'insight') => void }) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+  const items: { key: 'summary' | 'transcription' | 'insight'; icon: keyof typeof Feather.glyphMap; label: string; sub: string }[] = [
+    { key: 'summary', icon: 'file-text', label: 'View summary', sub: 'TL;DR of the conversation' },
+    { key: 'transcription', icon: 'mic', label: 'View transcription', sub: 'Voice & video call transcript' },
+    { key: 'insight', icon: 'zap', label: 'View insight', sub: 'AI analysis of patterns & action items' },
+  ];
+
+  return (
+    <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.25)' }}>
+        <View style={{
+          position: 'absolute',
+          top: insets.top + (Platform.OS === 'web' ? 60 : 8) + 50,
+          right: 12,
+          width: 280,
+          backgroundColor: c.card, borderRadius: 12, borderWidth: 1, borderColor: c.border,
+          overflow: 'hidden',
+          shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.18, shadowRadius: 16,
+          elevation: 8,
+        }}>
+          {items.map((it, i) => (
+            <TouchableOpacity
+              key={it.key}
+              onPress={() => onPick(it.key)}
+              activeOpacity={0.6}
+              style={{
+                flexDirection: 'row', alignItems: 'center', gap: 12,
+                paddingHorizontal: 14, paddingVertical: 12,
+                borderBottomWidth: i === items.length - 1 ? 0 : 1, borderBottomColor: c.divider,
+              }}
+            >
+              <View style={{
+                width: 32, height: 32, borderRadius: 8,
+                backgroundColor: c.brandLight, alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Feather name={it.icon} size={15} color={c.brand} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 14, color: c.foreground }}>{it.label}</Text>
+                <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 11, color: c.mutedForeground, marginTop: 1 }}>
+                  {it.sub}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function ThreadInsightSheet({
+  kind, title, onClose,
+}: { kind: null | 'summary' | 'transcription' | 'insight'; title: string; onClose: () => void }) {
+  const c = useColors();
+  const insets = useSafeAreaInsets();
+  if (!kind) return null;
+
+  const data = {
+    summary: {
+      heading: 'Conversation Summary',
+      icon: 'file-text' as const,
+      body: `Sarah Jenkins flagged Mary Lou Smith as DECLINING overnight with possible UTI signs. Marcus Lee covered Walter Jefferson's post-fall checks. Vitals were captured for Mary Lou and reassessment is in progress. Dr. Cole approved IV antibiotics and will round at 10:00 AM.`,
+      tags: ['UTI workup', 'Mary Lou', 'IV abx approved'],
+    },
+    transcription: {
+      heading: 'Call Transcription',
+      icon: 'mic' as const,
+      body: `[8:02 AM] Dr. Cole: Morning team — let's prioritize 204B today.\n\n[8:04 AM] Sarah: On it. Mary Lou flagged DECLINING overnight, getting fresh vitals.\n\n[8:06 AM] Marcus: I'll cover Walter's post-fall checks.\n\n[8:14 AM] Sarah: All vitals captured for Mary Lou. Starting reassessment now.`,
+      tags: ['Duration 4:32', '4 speakers'],
+    },
+    insight: {
+      heading: 'AI Insight',
+      icon: 'zap' as const,
+      body: `Two declining residents discussed without a clear delegate for follow-up. Mary Lou's UTI workup is on track, but Walter's post-fall checks have no documented completion timestamp. Recommend assigning a reassessment owner with a 2-hour follow-up window.`,
+      tags: ['2 action items', '1 risk flagged'],
+    },
+  }[kind];
+
+  return (
+    <Modal transparent visible={!!kind} animationType="slide" onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
+        <Pressable onPress={(e) => e.stopPropagation()} style={{
+          backgroundColor: c.card,
+          borderTopLeftRadius: 20, borderTopRightRadius: 20,
+          paddingTop: 12,
+          paddingBottom: insets.bottom + 16,
+          maxHeight: '80%',
+        }}>
+          <View style={{ alignItems: 'center', paddingBottom: 8 }}>
+            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: c.borderStrong }} />
+          </View>
+          <View style={{ paddingHorizontal: 20, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{
+              width: 36, height: 36, borderRadius: 10,
+              backgroundColor: c.brand, alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Feather name={data.icon} size={18} color="#FFFFFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 16, color: c.foreground }}>{data.heading}</Text>
+              <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 11, color: c.mutedForeground, marginTop: 2 }} numberOfLines={1}>
+                {title}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={onClose} hitSlop={8}>
+              <Feather name="x" size={20} color={c.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+          <View style={{ height: 1, backgroundColor: c.divider }} />
+          <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
+            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, lineHeight: 22, color: c.foreground }}>
+              {data.body}
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {data.tags.map((t, i) => (
+                <View key={i} style={{
+                  paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999,
+                  backgroundColor: c.brandLight,
+                }}>
+                  <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, color: c.brandText }}>{t}</Text>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }

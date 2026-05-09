@@ -48,13 +48,20 @@ export default function TabLayout() {
         name="ai"
         options={{
           title: 'AI',
-          tabBarIcon: ({ color, focused }) => (
+          tabBarIcon: ({ focused }) => (
             <View style={{
-              width: 28, height: 28, borderRadius: 14,
-              backgroundColor: focused ? c.brand : c.brandLight,
+              width: 52, height: 52, borderRadius: 26,
+              backgroundColor: c.brand,
               alignItems: 'center', justifyContent: 'center',
+              marginTop: -18,
+              borderWidth: 4, borderColor: c.card,
+              shadowColor: c.brand,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: focused ? 0.45 : 0.3,
+              shadowRadius: 8,
+              elevation: 6,
             }}>
-              <Feather name="zap" size={14} color={focused ? '#FFFFFF' : c.brand} />
+              <Feather name="zap" size={24} color="#FFFFFF" />
             </View>
           ),
         }}

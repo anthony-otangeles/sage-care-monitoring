@@ -28,7 +28,7 @@ function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerShown: false, headerBackTitle: "Back" }}>
       <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="resident/[id]" />
+      <Stack.Screen name="resident/[id]/index" />
       <Stack.Screen name="thread/[id]" />
     </Stack>
   );

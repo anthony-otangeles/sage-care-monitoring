@@ -17,22 +17,25 @@ export default function SituationScreen() {
   const c = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [openId, setOpenId] = useState<string | null>(null);
 
+  // Only residents that genuinely need DON attention:
+  // anyone DECLINING, or WATCHFUL with at least one unresolved concern.
   const priority = residents
-    .slice()
+    .filter(r => r.statusChips.includes('DECLINING') || (r.acuity === 'WATCHFUL' && r.situation.concerns.length > 0))
     .sort((a, b) => {
-      const w = (r: Resident) => (r.statusChips.includes('DECLINING') ? 0 : r.acuity === 'WATCHFUL' ? 1 : r.acuity === 'MONITORING' ? 2 : 3);
+      const w = (r: Resident) => (r.statusChips.includes('DECLINING') ? 0 : 1);
       return w(a) - w(b);
     });
+
+  const [openId, setOpenId] = useState<string | null>(priority[0]?.id ?? null);
 
   const toggle = (id: string) => {
     if (Platform.OS !== 'web') LayoutAnimation.configureNext(LayoutAnimation.create(220, 'easeInEaseOut', 'opacity'));
     setOpenId(openId === id ? null : id);
   };
 
-  const declining = residents.filter(r => r.statusChips.includes('DECLINING')).length;
-  const watchful = residents.filter(r => r.acuity === 'WATCHFUL').length;
+  const declining = priority.filter(r => r.statusChips.includes('DECLINING')).length;
+  const watchful = priority.length - declining;
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background }}>
@@ -45,7 +48,7 @@ export default function SituationScreen() {
       }}>
         <Text style={{ color: c.foreground, fontSize: 24, fontFamily: 'Inter_700Bold' }}>Situation</Text>
         <Text style={{ color: c.mutedForeground, fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 4 }}>
-          {declining} declining · {watchful} watchful · {residents.length} total
+          Needs your attention · {declining} declining · {watchful} watchful
         </Text>
       </View>
 
@@ -64,12 +67,9 @@ export default function SituationScreen() {
               >
                 <Image source={r.image} style={{ width: 44, height: 44, borderRadius: 22 }} contentFit="cover" />
                 <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 15, color: c.foreground }}>{r.name}</Text>
-                    <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 11, color: c.placeholder }}>· Room {r.room}</Text>
-                  </View>
-                  <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 12, color: c.mutedForeground, marginTop: 2 }} numberOfLines={1}>
-                    {r.latest}
+                  <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 15, color: c.foreground }}>{r.name}</Text>
+                  <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 11, color: c.placeholder, marginTop: 2 }}>
+                    Room {r.room}
                   </Text>
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 4 }}>
@@ -82,6 +82,16 @@ export default function SituationScreen() {
               {isOpen && (
                 <Animated.View entering={FadeIn.duration(180)} style={{ padding: 14, paddingTop: 0, gap: 14 }}>
                   <View style={{ height: 1, backgroundColor: c.divider }} />
+
+                  <View style={{
+                    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+                    backgroundColor: c.brandLight, borderRadius: 8, padding: 10,
+                  }}>
+                    <Feather name="alert-circle" size={14} color={c.brandText} style={{ marginTop: 2 }} />
+                    <Text style={{ flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 13, lineHeight: 18, color: c.brandText }}>
+                      {r.latest}
+                    </Text>
+                  </View>
 
                   <View>
                     <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.88, color: c.mutedForeground, marginBottom: 6 }}>

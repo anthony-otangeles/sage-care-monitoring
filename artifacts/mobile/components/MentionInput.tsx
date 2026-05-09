@@ -9,10 +9,11 @@ interface MentionInputProps {
   value: string;
   onChange: (text: string) => void;
   onSend: (text: string) => void;
+  onMic?: () => void;
   placeholder?: string;
 }
 
-export function MentionInput({ value, onChange, onSend, placeholder }: MentionInputProps) {
+export function MentionInput({ value, onChange, onSend, onMic, placeholder }: MentionInputProps) {
   const c = useColors();
   const inputRef = useRef<TextInput>(null);
   const [selection, setSelection] = useState({ start: 0, end: 0 });
@@ -108,6 +109,17 @@ export function MentionInput({ value, onChange, onSend, placeholder }: MentionIn
             }}
           />
         </View>
+        <TouchableOpacity
+          onPress={onMic ?? (() => {})}
+          activeOpacity={0.7}
+          style={{
+            width: 40, height: 40, borderRadius: 20,
+            backgroundColor: c.muted,
+            alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <Feather name="mic" size={16} color={c.brand} />
+        </TouchableOpacity>
         <TouchableOpacity
           onPress={handleSend}
           activeOpacity={0.8}

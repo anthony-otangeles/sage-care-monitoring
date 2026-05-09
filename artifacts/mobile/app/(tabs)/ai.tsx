@@ -98,6 +98,7 @@ export default function AIScreen() {
         value={draft}
         onChange={setDraft}
         onSend={send}
+        onMic={() => {}}
         placeholder="Ask Sage anything... @ to tag"
       />
     </KeyboardAvoidingView>
