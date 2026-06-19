@@ -47,6 +47,15 @@ import {
 } from "lucide-vue-next";
 
 import colors from "../constants/colors";
+import AppSelect from "./components/AppSelect.vue";
+import {
+  buildResidentIntelligence,
+  mockPccEvents,
+  type IntelligenceSource,
+  type IntelligenceUrgency,
+  type ResidentDailyInput,
+  type ResidentSourceEvent,
+} from "../data/intelligence";
 import {
   residents,
   type AcuityLevel,
@@ -81,6 +90,9 @@ type ViewName =
   | "cna-messages"
   | "cna-profile";
 type ResidentTab = "situation" | "talk" | "timeline" | "notes";
+type ResidentContextTab = "updates" | "actions" | "orders";
+type SituationAccordionKey = "facility-focus" | "requested-actions" | "facility-intelligence" | "current-watches";
+type ProviderHomeAccordionKey = "review-decide" | "facility-intelligence" | "assigned-actions" | "clinical-attention";
 type MessageTab = "threads" | "new";
 type ScheduleView = "list" | "calendar";
 type ScheduleDraftType = "huddle" | "follow-up" | "clinical-order";
@@ -88,11 +100,13 @@ type ScheduleStaffRole = RoleKey | "staff";
 type MessageStartMode = "message" | "voice-call" | "video-call";
 type ActionTargetRole = "provider" | "cna";
 type ActionPriority = "Stat" | "High" | "Routine";
+type SelectOption = { value: string; label: string };
 type ActionStatus = "open" | "in-progress" | "completed" | "flagged";
+type ActionStatusUpdateTarget = Extract<ActionStatus, "completed" | "flagged">;
 type EscalationStatus = "sent-to-hospital" | "requested-review";
 type HuddleStatus = "scheduled" | "started" | "completed";
 type ScheduleFollowUpStatus = "scheduled" | "completed";
-type ClinicalOrderStatus = "draft" | "ready" | "sent";
+type ClinicalOrderStatus = "ordered" | "in-progress" | "completed" | "flagged" | "cancelled";
 type ClinicalOrderType =
   | "Lab"
   | "Imaging"
@@ -175,13 +189,35 @@ interface ProfileFeature {
 
 interface ProviderOpportunity {
   id: string;
+  residentId: string;
   resident: Resident;
   category: string;
   facility: Facility;
   reason: string;
   changes: string[];
   surfaced: string;
-  urgency: "urgent" | "high" | "routine";
+  urgency: IntelligenceUrgency;
+  confidence: number;
+  recommendedAction: string;
+  evidence: ResidentSourceEvent[];
+}
+
+interface FacilityIntelligenceSummary {
+  facility: Facility;
+  total: number;
+  urgent: number;
+  high: number;
+  routine: number;
+  openActions: number;
+  pccEvents: number;
+  staffInputs: number;
+  providerInputs: number;
+  residentsCovered: number;
+  totalResidents: number;
+  readinessScore: number;
+  inputGaps: string[];
+  sources: IntelligenceSource[];
+  topOpportunity: ProviderOpportunity | null;
 }
 
 interface CnaAssignment {
@@ -214,6 +250,12 @@ interface ProviderNote {
   createdAt: string;
   status: "note" | "draft-created" | "ready-for-ehr";
   encounterDraft?: EncounterDraft;
+}
+
+interface EncounterModalDraft {
+  residentName: string;
+  visitType: VisitType;
+  notes: string;
 }
 
 interface CnaDebriefEntry {
@@ -264,6 +306,10 @@ interface ActionRequest {
   status: ActionStatus;
   sourceScreen: string;
   linkedThreadId?: string;
+  sourceOpportunityId?: string;
+  statusNote?: string;
+  statusChangedById?: string;
+  statusChangedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -339,6 +385,8 @@ interface ClinicalOrder {
   destination: "Otangeles Notes+";
   status: ClinicalOrderStatus;
   linkedThreadId?: string;
+  statusChangedAt?: string;
+  statusChangedById?: string;
   createdAt: string;
 }
 
@@ -358,6 +406,55 @@ interface ResidentScheduleItem {
   timeLabel: string;
   tone: string;
   threadId?: string;
+}
+
+type CareUpdateKind = "debrief" | "provider-note" | "order" | "action" | "escalation" | "huddle" | "follow-up";
+
+interface CareUpdate {
+  id: string;
+  kind: CareUpdateKind;
+  label: string;
+  title: string;
+  body: string;
+  meta: string;
+  status: string;
+  tone: string;
+  sortOrder: number;
+}
+
+interface ResidentTimelineEvent {
+  id: string;
+  timeAgo: string;
+  period: string;
+  icon: string;
+  title: string;
+  text: string;
+  interpretation?: string;
+  status?: string;
+  tone?: string;
+  sortOrder: number;
+}
+
+type FocusItemKind = "prediction" | "action" | "order" | "debrief" | "escalation" | "huddle";
+type FocusItemAction = "review-resident" | "create-action" | "review-action" | "open-debrief" | "open-schedule";
+
+interface FocusItem {
+  id: string;
+  kind: FocusItemKind;
+  title: string;
+  residentId?: string;
+  residentName?: string;
+  facility?: Facility;
+  body: string;
+  meta: string;
+  status: string;
+  tone: string;
+  rank: number;
+  primaryAction: FocusItemAction;
+  primaryLabel: string;
+  secondaryAction?: FocusItemAction;
+  secondaryLabel?: string;
+  sourceId?: string;
 }
 
 interface MonthCalendarCell {
@@ -405,6 +502,7 @@ interface ActionDraft {
   dueTime: string;
   instructions: string;
   createThread: boolean;
+  sourceOpportunityId?: string;
 }
 
 type AiMessage =
@@ -440,6 +538,10 @@ const facilities: Facility[] = [
   "Casa of Hobart",
   "Niles Care Center",
 ];
+
+function selectOption(value: string, label = value): SelectOption {
+  return { value, label };
+}
 
 const defaultLoginUserIds: Record<RoleKey, string> = {
   don: "u8",
@@ -739,6 +841,7 @@ const iconMap: Record<string, Component> = {
   "check-circle": CheckCircle,
   coffee: Coffee,
   eye: Eye,
+  "file-text": FileText,
   "git-branch": GitBranch,
   heart: Heart,
   moon: Moon,
@@ -746,6 +849,8 @@ const iconMap: Record<string, Component> = {
   thermometer: Thermometer,
   "trending-down": TrendingDown,
   "trending-up": TrendingUp,
+  users: Users,
+  clock: Clock,
 };
 
 const priorityResidents = residents
@@ -759,55 +864,6 @@ const priorityResidents = residents
       resident.statusChips.includes("DECLINING") ? 0 : 1;
     return rank(a) - rank(b);
   });
-
-const providerOpportunities: ProviderOpportunity[] = [
-  {
-    id: "po-1",
-    resident: residents[0],
-    category: "Acute Changes",
-    facility: residentFacility(residents[0]),
-    reason: "Worsening confusion, low-grade temp, tachycardia, and poor intake.",
-    changes: ["confusion increased overnight", "PO intake down to 30%", "UA not yet collected"],
-    surfaced: "7:42 AM",
-    urgency: "urgent",
-  },
-  {
-    id: "po-2",
-    resident: residents[1],
-    category: "Nurse Request",
-    facility: residentFacility(residents[1]),
-    reason: "Post-fall hip pain with imaging pending and lower BP than baseline.",
-    changes: ["left hip pain 4/10", "x-ray scheduled", "neuro checks underway"],
-    surfaced: "8:10 AM",
-    urgency: "high",
-  },
-  {
-    id: "po-3",
-    resident: residents[3],
-    category: "Follow-Up",
-    facility: residentFacility(residents[3]),
-    reason: "Three consecutive elevated fasting blood sugars after family food intake.",
-    changes: ["fasting BG 185", "diet pattern changed", "family teaching may be needed"],
-    surfaced: "8:35 AM",
-    urgency: "routine",
-  },
-  {
-    id: "po-4",
-    resident: residents[2],
-    category: "Monthly Visit Due",
-    facility: residentFacility(residents[2]),
-    reason: "Monthly compliance visit due after pneumonia antibiotic completion.",
-    changes: ["antibiotics completed", "lungs clear", "72-hour recheck recommended"],
-    surfaced: "Yesterday",
-    urgency: "routine",
-  },
-];
-
-const providerDocumentation = [
-  { id: "doc-1", title: "Mary Lou Smith - acute change note", status: "For review", due: "Today" },
-  { id: "doc-2", title: "Walter Jefferson - post-fall visit", status: "For signing", due: "Today" },
-  { id: "doc-3", title: "GDR review bundle", status: "Needs correction", due: "Tomorrow" },
-];
 
 const providerNotes = [
   "Continue current treatment for stable respiratory residents.",
@@ -1123,7 +1179,7 @@ const initialClinicalOrders: ClinicalOrder[] = [
     details: "UA with culture and sensitivity if indicated.",
     instructions: "Route result to provider and notify nursing if fever or mental status worsens.",
     destination: "Otangeles Notes+",
-    status: "draft",
+    status: "ordered",
     linkedThreadId: "t3",
     createdAt: "8:44 AM",
   },
@@ -1143,7 +1199,7 @@ const initialClinicalOrders: ClinicalOrder[] = [
     details: "Review hip x-ray result and confirm mobility restrictions.",
     instructions: "Update nursing plan after imaging review.",
     destination: "Otangeles Notes+",
-    status: "ready",
+    status: "in-progress",
     linkedThreadId: "t4",
     createdAt: "8:10 AM",
   },
@@ -1177,6 +1233,9 @@ const isAuthenticated = ref(false);
 const activeSituationId = ref<string | null>(priorityResidents[0]?.id ?? null);
 const selectedResidentId = ref<string | null>(null);
 const residentTab = ref<ResidentTab>("situation");
+const residentContextTab = ref<ResidentContextTab>("updates");
+const openSituationAccordion = ref<SituationAccordionKey>("facility-focus");
+const openProviderHomeAccordion = ref<ProviderHomeAccordionKey>("review-decide");
 const residentChat = ref<Resident["talk"]>([]);
 const residentDraft = ref("");
 const openClarify = ref<number | null>(null);
@@ -1200,8 +1259,14 @@ const cnaResidentSearchQuery = ref("");
 const scheduleView = ref<ScheduleView>("list");
 const providerNoteDraft = ref("");
 const providerNotesState = ref<ProviderNote[]>([...initialProviderNotes]);
-const selectedProviderNoteId = ref<string | null>(initialProviderNotes[0]?.id ?? null);
-const noteActionMenuOpen = ref<string | null>(null);
+const expandedProviderNoteId = ref<string | null>(null);
+const encounterModalNoteId = ref<string | null>(null);
+const encounterModalDraft = ref<EncounterModalDraft>({
+  residentName: "",
+  visitType: "Follow-Up",
+  notes: "",
+});
+const deleteProviderNoteId = ref<string | null>(null);
 const providerRecordingActive = ref(false);
 const providerRecordingSeconds = ref(0);
 const providerTranscript = ref("");
@@ -1238,6 +1303,11 @@ const selectedFeatureId = ref("");
 const showSignOutModal = ref(false);
 const profileMenuOpen = ref(false);
 const passwordDraft = ref({ current: "", next: "", confirm: "" });
+const profileChangesAppliedAt = ref<Record<RoleKey, string>>({
+  don: "Not applied this session",
+  provider: "Not applied this session",
+  cna: "Not applied this session",
+});
 const activeSettingsPanel = ref<ProfileModalKey>("profile");
 const actionRequests = ref<ActionRequest[]>(initialActionRequests.map((action) => ({ ...action })));
 const hospitalEscalations = ref<HospitalEscalation[]>(
@@ -1255,6 +1325,66 @@ const scheduleFollowUps = ref<ScheduleFollowUp[]>(
 const clinicalOrders = ref<ClinicalOrder[]>(
   initialClinicalOrders.map((order) => ({ ...order })),
 );
+const residentDailyInputs = computed<ResidentDailyInput[]>(() => [
+  ...cnaDebriefs.value
+    .filter((entry) => entry.transcript.trim())
+    .map((entry) => ({
+      id: `daily-cna-${entry.assignmentId}`,
+      residentId: entry.residentId,
+      source: "Staff input" as const,
+      label: "CNA debrief",
+      detail: entry.flaggedConcern ? `${entry.transcript} ${entry.flaggedConcern}` : entry.transcript,
+      capturedAt: entry.capturedAt ?? "Current shift",
+      severity: entry.status === "flagged" ? "high" as const : "watch" as const,
+    })),
+  ...providerNotesState.value.map((note) => ({
+    id: `daily-note-${note.id}`,
+    residentId: note.residentId,
+    source: "Provider input" as const,
+    label: note.source === "voice" ? "Provider voice note" : "Provider note",
+    detail: note.body,
+    capturedAt: note.createdAt,
+    severity: "watch" as const,
+  })),
+  ...clinicalOrders.value.map((order) => ({
+    id: `daily-order-${order.id}`,
+    residentId: order.residentId,
+    source: "Provider input" as const,
+    label: `${order.orderType} order`,
+    detail: `${order.details}${order.instructions ? ` ${order.instructions}` : ""}`,
+    capturedAt: formatDateTimeLabel(order.requestedDate, order.requestedTime),
+    severity: order.status === "flagged" ? "high" as const : "watch" as const,
+  })),
+  ...actionRequests.value
+    .filter((action) => action.statusNote?.trim() || action.status === "flagged")
+    .map((action) => ({
+      id: `daily-action-${action.id}`,
+      residentId: action.residentId,
+      source: action.assignedRole === "provider" ? "Provider input" as const : "Staff input" as const,
+      label: `${action.actionType} ${actionStatusLabel(action.status)}`,
+      detail: action.statusNote?.trim() || action.instructions,
+      capturedAt: action.statusChangedAt ?? action.updatedAt,
+      severity: action.status === "flagged" ? "high" as const : "normal" as const,
+    })),
+]);
+const providerOpportunities = computed<ProviderOpportunity[]>(() =>
+  buildResidentIntelligence({
+    residents,
+    facilityForResident: residentFacility,
+    dailyInputs: residentDailyInputs.value,
+  })
+    .map((opportunity) => {
+      const resident = residents.find((entry) => entry.id === opportunity.residentId);
+      return resident
+        ? {
+            ...opportunity,
+            resident,
+            facility: opportunity.facility as Facility,
+          }
+        : null;
+    })
+    .filter((opportunity): opportunity is ProviderOpportunity => Boolean(opportunity)),
+);
 const taggedMessageContext = ref<TaggedMessageContext | null>(null);
 const actionModalSource = ref<string | null>(null);
 const actionDraft = ref<ActionDraft>({
@@ -1266,7 +1396,14 @@ const actionDraft = ref<ActionDraft>({
   dueTime: "Now",
   instructions: "",
   createThread: true,
+  sourceOpportunityId: undefined,
 });
+const actionStatusDraft = ref({
+  actionId: "",
+  status: "completed" as ActionStatusUpdateTarget,
+  note: "",
+});
+const expandedSections = ref<Record<string, boolean>>({});
 const escalationModalResidentId = ref<string | null>(null);
 const escalationDraft = ref({
   urgency: "High" as ActionPriority,
@@ -1275,15 +1412,6 @@ const escalationDraft = ref({
   notes: "",
   followUpTime: "Today 1:00 PM",
   notifyTeam: true,
-});
-const huddleModalResidentId = ref<string | null>(null);
-const huddleDraft = ref({
-  title: "",
-  scheduledFor: "Today 2:00 PM",
-  duration: "20 min",
-  participantIds: [] as string[],
-  callMode: "video-call" as Exclude<MessageStartMode, "message">,
-  agenda: "",
 });
 const activeScheduleMonth = ref(startOfMonth(new Date()));
 const selectedScheduleDateKey = ref<string | null>(null);
@@ -1326,8 +1454,27 @@ const activeStaffUser = computed(
     loginStaffOptions.value[0] ??
     providerUser,
 );
+const activeRoleMetric = computed(() => {
+  if (selectedRole.value === "provider") {
+    return {
+      metricValue: String(filteredProviderOpportunities.value.length),
+      metricLabel: "generated opportunities",
+    };
+  }
+  if (selectedRole.value === "cna") {
+    return {
+      metricValue: String(filteredCnaAssignments.value.length),
+      metricLabel: "assigned residents",
+    };
+  }
+  return {
+    metricValue: String(filteredPriorityResidents.value.length),
+    metricLabel: "active watches",
+  };
+});
 const activeRole = computed<RoleProfile>(() => ({
   ...roleProfiles[selectedRole.value],
+  ...activeRoleMetric.value,
   name: activeStaffUser.value.name,
   role: activeStaffUser.value.role,
   image: activeStaffUser.value.image,
@@ -1340,10 +1487,6 @@ const facilityOptions = computed<FacilitySelection[]>(() => {
     ? activeProfile.value.assignedFacilities
     : [facilities[0]];
   return selectedRole.value === "cna" ? assigned : ["all", ...assigned];
-});
-const selectedFacilityModel = computed({
-  get: () => selectedFacility.value,
-  set: (facility: FacilitySelection) => setSelectedFacility(facility),
 });
 const defaultFacilityLabel = computed(() =>
   activeProfile.value.defaultFacility === "all" ? "All Facilities" : activeProfile.value.defaultFacility,
@@ -1362,10 +1505,82 @@ const filteredPriorityResidents = computed(() =>
   ),
 );
 const filteredProviderOpportunities = computed(() =>
-  providerOpportunities.filter(
+  providerOpportunities.value.filter(
     (opportunity) => selectedFacility.value === "all" || opportunity.facility === selectedFacility.value,
   ),
 );
+const facilityIntelligenceSummaries = computed<FacilityIntelligenceSummary[]>(() =>
+  facilities
+    .filter((facility) => activeProfile.value.assignedFacilities.includes(facility))
+    .map((facility) => {
+      const facilityResidents = residents.filter((resident) => residentFacility(resident) === facility);
+      const facilityResidentIds = new Set(facilityResidents.map((resident) => resident.id));
+      const pccEvents = mockPccEvents.filter((event) => facilityResidentIds.has(event.residentId));
+      const dailyInputs = residentDailyInputs.value.filter((input) => facilityResidentIds.has(input.residentId));
+      const staffInputs = dailyInputs.filter((input) => input.source === "Staff input");
+      const providerInputs = dailyInputs.filter((input) => input.source === "Provider input");
+      const coveredResidentIds = new Set([
+        ...pccEvents.map((event) => event.residentId),
+        ...dailyInputs.map((input) => input.residentId),
+      ]);
+      const opportunities = providerOpportunities.value.filter((opportunity) => opportunity.facility === facility);
+      const readinessScore = facilityResidents.length
+        ? Math.round((coveredResidentIds.size / facilityResidents.length) * 100)
+        : 0;
+      const unassignedHighRisk = opportunities.filter(
+        (opportunity) =>
+          (opportunity.urgency === "urgent" || opportunity.urgency === "high") &&
+          !actionByOpportunityId.value.has(opportunity.id),
+      ).length;
+      const inputGaps = [
+        ...(readinessScore < 35 ? ["PCC/source coverage is thin for this facility"] : []),
+        ...(staffInputs.length === 0 ? ["No CNA/staff inputs captured yet"] : []),
+        ...(providerInputs.length === 0 ? ["No provider inputs captured yet"] : []),
+        ...(unassignedHighRisk ? [`${unassignedHighRisk} high-risk prediction${unassignedHighRisk === 1 ? "" : "s"} still need assigned action`] : []),
+      ];
+      const sourceSet = new Set<IntelligenceSource>();
+      opportunities.forEach((opportunity) => {
+        opportunity.evidence.forEach((event) => sourceSet.add(event.source));
+      });
+      dailyInputs.forEach((input) => sourceSet.add(input.source));
+
+      return {
+        facility,
+        total: opportunities.length,
+        urgent: opportunities.filter((opportunity) => opportunity.urgency === "urgent").length,
+        high: opportunities.filter((opportunity) => opportunity.urgency === "high").length,
+        routine: opportunities.filter((opportunity) => opportunity.urgency === "routine").length,
+        openActions: actionRequests.value.filter(
+          (action) => action.facility === facility && action.status !== "completed",
+        ).length,
+        pccEvents: pccEvents.length,
+        staffInputs: staffInputs.length,
+        providerInputs: providerInputs.length,
+        residentsCovered: coveredResidentIds.size,
+        totalResidents: facilityResidents.length,
+        readinessScore,
+        inputGaps,
+        sources: [...sourceSet],
+        topOpportunity: opportunities[0] ?? null,
+      };
+    })
+    .filter((summary) => summary.total > 0 || summary.openActions > 0)
+    .sort((a, b) => b.urgent - a.urgent || b.high - a.high || b.total - a.total),
+);
+const filteredFacilityIntelligenceSummaries = computed(() =>
+  facilityIntelligenceSummaries.value.filter(
+    (summary) => selectedFacility.value === "all" || summary.facility === selectedFacility.value,
+  ),
+);
+const actionByOpportunityId = computed(() => {
+  const map = new Map<string, ActionRequest>();
+  actionRequests.value.forEach((action) => {
+    if (action.sourceOpportunityId && !map.has(action.sourceOpportunityId)) {
+      map.set(action.sourceOpportunityId, action);
+    }
+  });
+  return map;
+});
 const filteredProviderNotes = computed(() =>
   providerNotesState.value.filter((note) => {
     const resident = residents.find((entry) => entry.id === note.residentId);
@@ -1420,7 +1635,18 @@ const selectedResidentActions = computed(() =>
     ? actionRequests.value.filter((action) => action.residentId === selectedResident.value?.id)
     : [],
 );
+const selectedResidentOpenActionCount = computed(() =>
+  selectedResidentActions.value.filter((action) => action.status !== "completed").length,
+);
 const visibleScheduleItems = computed(() => scheduleItemsForRole(selectedRole.value));
+const visibleScheduleMonthItems = computed(() => {
+  const year = activeScheduleMonth.value.getFullYear();
+  const month = activeScheduleMonth.value.getMonth();
+  return visibleScheduleItems.value.filter((item) => {
+    const itemDate = dateFromKey(item.dateKey);
+    return itemDate.getFullYear() === year && itemDate.getMonth() === month;
+  });
+});
 const scheduleMonthLabel = computed(() =>
   activeScheduleMonth.value.toLocaleDateString([], { month: "long", year: "numeric" }),
 );
@@ -1438,10 +1664,69 @@ const selectedResidentScheduleItems = computed(() =>
     ? visibleScheduleItems.value.filter((item) => item.residentId === selectedResident.value?.id)
     : [],
 );
-const selectedResidentClinicalOrders = computed(() =>
-  selectedResident.value
-    ? clinicalOrders.value.filter((order) => order.residentId === selectedResident.value?.id)
-    : [],
+const selectedResidentCareUpdates = computed(() =>
+  selectedResident.value ? careUpdatesForResident(selectedResident.value.id).slice(0, 8) : [],
+);
+const selectedResidentTimelineEvents = computed(() =>
+  selectedResident.value ? timelineEventsForResident(selectedResident.value) : [],
+);
+const donFocusItems = computed(() =>
+  sortFocusItems([
+    ...filteredFacilityIntelligenceSummaries.value
+      .filter((summary) => summary.topOpportunity)
+      .map((summary) => focusItemFromOpportunity(summary.topOpportunity!, {
+        id: `facility-${summary.facility}`,
+        title: `${summary.facility}: ${summary.topOpportunity!.resident.name}`,
+        meta: `${summary.urgent} urgent · ${summary.high} high · ${summary.openActions} open actions`,
+        rankBoost: 10,
+      })),
+    ...openActionRequests.value.map((action) => focusItemFromAction(action, "Review chart")),
+    ...hospitalEscalations.value
+      .filter((escalation) => selectedFacility.value === "all" || escalation.facility === selectedFacility.value)
+      .map(focusItemFromEscalation),
+  ]).slice(0, 6),
+);
+const providerFocusItems = computed(() =>
+  sortFocusItems([
+    ...filteredProviderOpportunities.value.map((opportunity) =>
+      focusItemFromOpportunity(opportunity, { reviewActionLabel: "Review action" }),
+    ),
+    ...providerActionRequests.value
+      .filter((action) => action.status !== "completed" && !action.sourceOpportunityId)
+      .map((action) => focusItemFromAction(action, "Review")),
+    ...clinicalOrders.value
+      .filter((order) => order.status !== "completed" && order.status !== "cancelled")
+      .filter((order) => selectedFacility.value === "all" || order.facility === selectedFacility.value)
+      .map(focusItemFromOrder),
+  ]).slice(0, 7),
+);
+const cnaFocusItems = computed(() =>
+  sortFocusItems([
+    ...cnaActionRequests.value
+      .filter((action) => action.status !== "completed")
+      .map((action) => focusItemFromAction(action, "View")),
+    ...filteredCnaDebriefs.value
+      .filter((entry) => entry.status !== "captured")
+      .map(focusItemFromDebrief)
+      .filter((item): item is FocusItem => Boolean(item)),
+  ]).slice(0, 6),
+);
+const selectedResidentHasUrgentCareUpdates = computed(() =>
+  selectedResidentCareUpdates.value.some((update) => update.tone === "danger" || update.status.toLowerCase().includes("flagged")),
+);
+const selectedResidentHasUrgentWork = computed(() =>
+  selectedResidentActions.value.some((action) => action.status === "flagged" || action.priority === "Stat"),
+);
+const selectedResidentHasUrgentOrders = computed(() =>
+  selectedResidentScheduleItems.value.some(
+    (item) =>
+      item.kind === "escalation" ||
+      item.tone === "Stat" ||
+      (item.kind === "order" && orderStatusForScheduleItem(item) === "flagged"),
+  ),
+);
+const selectedResidentHasAbnormalVitals = computed(() =>
+  Boolean(selectedResident.value?.situation.vitals.some((vital) => vital.isAbnormal)),
 );
 const scheduleResidentOptions = computed(() => {
   if (selectedRole.value === "cna") {
@@ -1450,8 +1735,10 @@ const scheduleResidentOptions = computed(() => {
   return filteredResidents.value;
 });
 const searchedScheduleResidentOptions = computed(() =>
-  scheduleResidentOptions.value.filter((resident) =>
-    residentMatchesSearch(resident, scheduleResidentSearchQuery.value),
+  scheduleResidentOptions.value.filter(
+    (resident) =>
+      resident.id !== scheduleDraft.value.residentId &&
+      residentMatchesSearch(resident, scheduleResidentSearchQuery.value),
   ),
 );
 const scheduleStaffOptions = computed(() => users);
@@ -1461,11 +1748,6 @@ const searchedScheduleStaffOptions = computed(() =>
 const escalationModalResident = computed(() =>
   escalationModalResidentId.value
     ? residents.find((resident) => resident.id === escalationModalResidentId.value) ?? null
-    : null,
-);
-const huddleModalResident = computed(() =>
-  huddleModalResidentId.value
-    ? residents.find((resident) => resident.id === huddleModalResidentId.value) ?? null
     : null,
 );
 const scheduleModalResident = computed(() =>
@@ -1494,6 +1776,24 @@ const scheduleDraftCanSave = computed(() => {
     );
   }
   return Boolean(scheduleDraft.value.details.trim());
+});
+const scheduleModalCopy = computed(() => {
+  if (scheduleDraft.value.type === "clinical-order") {
+    return {
+      title: editingClinicalOrderId.value ? "Edit Clinical Order" : "New Clinical Order",
+      description: "Add a provider order to the resident's shared care plan.",
+    };
+  }
+  if (scheduleDraft.value.type === "follow-up") {
+    return {
+      title: "New Follow-up",
+      description: "Schedule a resident follow-up reminder for the care team.",
+    };
+  }
+  return {
+    title: "Schedule Huddle",
+    description: "Schedule a resident care-team huddle in this resident's coordination thread.",
+  };
 });
 const residentTabs = computed(() =>
   selectedRole.value === "provider"
@@ -1525,6 +1825,15 @@ const messageHeader = computed(() => {
   };
 });
 const profileHeader = computed(() => "Settings");
+const otangelesAccount = computed(() => ({
+  status: "Connected",
+  workspace: "Otangeles Notes+",
+  connectedAs: activeProfile.value.email,
+  practiceAdmin: "Mara Whitlock",
+  adminRole: "Practice Admin",
+  adminContact: "mara.whitlock@otangelesnotes.local",
+  syncScope: "Visit drafts, clinical orders, huddle summaries, and escalation notes",
+}));
 const profileMenuRoleLabel = computed(() => {
   if (selectedRole.value === "provider") {
     if (/medical doctor|doctor|attending|medical director/i.test(activeStaffUser.value.role)) {
@@ -1546,11 +1855,15 @@ const selectedResidentNotes = computed(() =>
     ? providerNotesState.value.filter((note) => note.residentId === selectedResident.value?.id)
     : [],
 );
-const selectedProviderNote = computed(
-  () =>
-    providerNotesState.value.find((note) => note.id === selectedProviderNoteId.value) ??
-    selectedResidentNotes.value[0] ??
-    null,
+const encounterModalNote = computed(() =>
+  encounterModalNoteId.value
+    ? providerNotesState.value.find((note) => note.id === encounterModalNoteId.value) ?? null
+    : null,
+);
+const deleteProviderNoteTarget = computed(() =>
+  deleteProviderNoteId.value
+    ? providerNotesState.value.find((note) => note.id === deleteProviderNoteId.value) ?? null
+    : null,
 );
 const currentDebriefAssignment = computed(
   () =>
@@ -1587,6 +1900,11 @@ const selectedResident = computed(() =>
     ? residents.find((resident) => resident.id === selectedResidentId.value) ?? null
     : null,
 );
+const selectedResidentOpportunity = computed(() =>
+  selectedResident.value
+    ? providerOpportunities.value.find((opportunity) => opportunity.resident.id === selectedResident.value?.id) ?? null
+    : null,
+);
 
 const decliningCount = computed(
   () =>
@@ -1614,6 +1932,18 @@ const visibleThreads = computed(() => [
   ...createdThreads.value,
   ...threads.filter((thread) => !createdThreads.value.some((created) => created.id === thread.id)),
 ]);
+
+const messageNavUnreadCount = computed(() =>
+  visibleThreads.value.reduce((total, thread) => total + thread.unread, 0),
+);
+
+function isMessagesNavView(view: ViewName) {
+  return view === "messages" || view === "provider-collaboration" || view === "cna-messages";
+}
+
+function navBadgeCount(view: ViewName) {
+  return isMessagesNavView(view) ? messageNavUnreadCount.value : 0;
+}
 
 const selectedThread = computed<Thread | null>(() => {
   if (!selectedThreadId.value) {
@@ -1659,7 +1989,7 @@ const clinicalRecipients = computed(() =>
 );
 const taggedMessageOpportunity = computed(() =>
   taggedMessageContext.value
-    ? providerOpportunities.find((opportunity) => opportunity.id === taggedMessageContext.value?.opportunityId) ?? null
+    ? providerOpportunities.value.find((opportunity) => opportunity.id === taggedMessageContext.value?.opportunityId) ?? null
     : null,
 );
 const taggedMessageResident = computed(() =>
@@ -1677,6 +2007,77 @@ const actionAssigneeOptions = computed(() =>
 );
 const actionTypeOptions = computed(() =>
   actionDraft.value.assignedRole === "provider" ? providerActionTypes : cnaActionTypes,
+);
+const actionStatusModalAction = computed(() =>
+  actionStatusDraft.value.actionId
+    ? actionRequests.value.find((action) => action.id === actionStatusDraft.value.actionId) ?? null
+    : null,
+);
+const actionStatusModalCopy = computed(() => {
+  if (actionStatusDraft.value.status === "flagged") {
+    return {
+      title: "Report concern",
+      description: "Share what needs nurse or provider review before this action is closed.",
+      noteLabel: "What needs review?",
+      placeholder: "Example: Resident refused care, pain increased, transfer felt unsafe...",
+      submitLabel: "Report concern",
+    };
+  }
+
+  return {
+    title: "Complete care action",
+    description: "Confirm the care action was completed and add context for the team if helpful.",
+    noteLabel: "Add a quick note",
+    placeholder: "Example: Fluids encouraged and tolerated, resident comfortable after repositioning...",
+    submitLabel: "Complete care",
+  };
+});
+const actionStatusCanSubmit = computed(
+  () => actionStatusDraft.value.status === "completed" || Boolean(actionStatusDraft.value.note.trim()),
+);
+
+const roleSelectOptions = computed<SelectOption[]>(() =>
+  Object.values(roleProfiles).map((role) => selectOption(role.key, role.label)),
+);
+const loginStaffSelectOptions = computed<SelectOption[]>(() =>
+  loginStaffOptions.value.map((user) => selectOption(user.id, `${user.name} · ${user.role}`)),
+);
+const facilitySelectOptions = computed<SelectOption[]>(() =>
+  facilityOptions.value.map((facility) => selectOption(facility, facilityOptionLabel(facility))),
+);
+const roleFacilitySelectOptions = computed<SelectOption[]>(() =>
+  roleFacilityOptions(selectedRole.value).map((facility) => selectOption(facility, facilityOptionLabel(facility))),
+);
+const visitTypeSelectOptions = computed<SelectOption[]>(() =>
+  visitTypes.map((visitType) => selectOption(visitType)),
+);
+const appearanceSelectOptions: SelectOption[] = ["System", "Light", "Dark"].map((value) => selectOption(value));
+const languageSelectOptions: SelectOption[] = ["English (US)", "Spanish"].map((value) => selectOption(value));
+const prioritySelectOptions: SelectOption[] = ["Stat", "High", "Routine"].map((value) => selectOption(value));
+const scheduleTypeSelectOptions = computed<SelectOption[]>(() => [
+  selectOption("huddle", "Huddle"),
+  selectOption("follow-up", "Follow-up"),
+  ...(selectedRole.value === "provider" ? [selectOption("clinical-order", "Clinical Order")] : []),
+]);
+const scheduleEventSelectOptions = computed<SelectOption[]>(() =>
+  scheduleEventTypeOptions.value.map((eventType) => selectOption(eventType)),
+);
+const callModeSelectOptions: SelectOption[] = [
+  selectOption("voice-call", "Voice call"),
+  selectOption("video-call", "Video call"),
+];
+const actionResidentSelectOptions = computed<SelectOption[]>(() =>
+  filteredResidents.value.map((resident) => selectOption(resident.id, `${resident.name} · Room ${resident.room}`)),
+);
+const actionRoleSelectOptions: SelectOption[] = [
+  selectOption("provider", "Provider"),
+  selectOption("cna", "CNA"),
+];
+const actionAssigneeSelectOptions = computed<SelectOption[]>(() =>
+  actionAssigneeOptions.value.map((user) => selectOption(user.id, `${user.name} · ${user.role}`)),
+);
+const actionTypeSelectOptions = computed<SelectOption[]>(() =>
+  actionTypeOptions.value.map((actionType) => selectOption(actionType)),
 );
 
 const aiSeed: AiMessage[] = [
@@ -1791,6 +2192,9 @@ const aiDraft = ref("");
 
 const remainingPrompts = computed(() =>
   suggestedPrompts.filter((prompt) => !usedPrompts.value.includes(prompt.id)),
+);
+const providerSageMessages = computed(() =>
+  aiMessages.value.filter((message) => message.kind !== "briefing"),
 );
 
 const greeting = computed(() => {
@@ -1962,6 +2366,10 @@ function updatePassword() {
   passwordDraft.value = { current: "", next: "", confirm: "" };
 }
 
+function applyProfileChanges() {
+  profileChangesAppliedAt.value[selectedRole.value] = currentTimeLabel();
+}
+
 function revokeSession(sessionId: string) {
   activeSessions.value[selectedRole.value] = activeSessions.value[selectedRole.value].filter(
     (session) => session.id !== sessionId || session.current,
@@ -1981,6 +2389,167 @@ function userName(userId: string) {
 
 function actionAssigneeName(action: ActionRequest) {
   return userName(action.assignedUserId);
+}
+
+function actionStatusLabel(status: ActionStatus) {
+  return status.replace("-", " ");
+}
+
+function actionCareUpdateBody(action: ActionRequest) {
+  const statusNote = action.statusNote?.trim();
+  if (!statusNote) {
+    return action.instructions;
+  }
+
+  const noteLabel = action.status === "flagged" ? "Concern reported" : "Latest update";
+  return `${action.instructions} ${noteLabel}: ${statusNote}`;
+}
+
+function actionCareUpdateMeta(action: ActionRequest) {
+  const changedBy = action.statusChangedById ? ` by ${userName(action.statusChangedById)}` : "";
+  return `${actionAssigneeName(action)} · ${action.dueTime} · Updated ${action.statusChangedAt ?? action.updatedAt}${changedBy}`;
+}
+
+function focusRankForPriority(priority: string) {
+  const normalized = priority.toLowerCase();
+  if (normalized.includes("stat") || normalized.includes("urgent") || normalized.includes("danger")) {
+    return 100;
+  }
+  if (normalized.includes("high") || normalized.includes("flagged") || normalized.includes("declining")) {
+    return 80;
+  }
+  if (normalized.includes("open") || normalized.includes("progress") || normalized.includes("watch")) {
+    return 60;
+  }
+  return 40;
+}
+
+function focusRankForOpportunity(opportunity: ProviderOpportunity) {
+  return focusRankForPriority(opportunity.urgency) + Math.round(opportunity.confidence / 10);
+}
+
+function sortFocusItems(items: FocusItem[]) {
+  return items
+    .slice()
+    .sort((a, b) => b.rank - a.rank || a.title.localeCompare(b.title));
+}
+
+function focusItemFromOpportunity(
+  opportunity: ProviderOpportunity,
+  options: {
+    id?: string;
+    title?: string;
+    meta?: string;
+    rankBoost?: number;
+    includeSecondaryAction?: boolean;
+    reviewActionLabel?: string;
+  } = {},
+): FocusItem {
+  const linkedAction = actionForOpportunity(opportunity);
+  const includeSecondaryAction = options.includeSecondaryAction ?? true;
+  const showSecondaryAction = includeSecondaryAction && !linkedAction;
+  return {
+    id: options.id ?? `prediction-${opportunity.id}`,
+    kind: "prediction",
+    title: options.title ?? `${opportunity.resident.name} · ${opportunity.category}`,
+    residentId: opportunity.resident.id,
+    residentName: opportunity.resident.name,
+    facility: opportunity.facility,
+    body: opportunity.reason,
+    meta: options.meta ?? `${opportunity.confidence}% confidence · ${opportunitySourceSummary(opportunity)}`,
+    status: opportunityActionStatusLabel(opportunity),
+    tone: opportunity.urgency,
+    rank: focusRankForOpportunity(opportunity) + (options.rankBoost ?? 0),
+    primaryAction: linkedAction ? "review-action" : "create-action",
+    primaryLabel: linkedAction ? options.reviewActionLabel ?? "Review action" : "Assign action",
+    secondaryAction: showSecondaryAction ? "review-resident" : undefined,
+    secondaryLabel: showSecondaryAction ? "Review chart" : undefined,
+    sourceId: opportunity.id,
+  };
+}
+
+function focusItemFromAction(action: ActionRequest, primaryLabel: string): FocusItem {
+  return {
+    id: `action-${action.id}`,
+    kind: "action",
+    title: `${action.residentName} · ${action.actionType}`,
+    residentId: action.residentId,
+    residentName: action.residentName,
+    facility: action.facility,
+    body: action.instructions,
+    meta: `${actionAssigneeName(action)} · ${action.priority} · ${action.dueTime}`,
+    status: action.status.replace("-", " "),
+    tone: action.status === "flagged" ? "danger" : action.priority,
+    rank: focusRankForPriority(action.status === "flagged" ? "flagged" : action.priority),
+    primaryAction: "review-resident",
+    primaryLabel,
+    sourceId: action.id,
+  };
+}
+
+function focusItemFromOrder(order: ClinicalOrder): FocusItem {
+  return {
+    id: `order-${order.id}`,
+    kind: "order",
+    title: `${order.residentName} · ${order.orderType} order`,
+    residentId: order.residentId,
+    residentName: order.residentName,
+    facility: order.facility,
+    body: order.details,
+    meta: formatDateTimeLabel(order.requestedDate, order.requestedTime),
+    status: order.status.replaceAll("-", " "),
+    tone: statusTone(order.status),
+    rank: focusRankForPriority(order.status === "flagged" ? "flagged" : order.priority),
+    primaryAction: "open-schedule",
+    primaryLabel: selectedRole.value === "provider" ? "Review order" : "Review chart",
+    secondaryAction: selectedRole.value === "provider" ? "review-resident" : undefined,
+    secondaryLabel: selectedRole.value === "provider" ? "Review chart" : undefined,
+    sourceId: order.id,
+  };
+}
+
+function focusItemFromDebrief(entry: CnaDebriefEntry): FocusItem | null {
+  const assignment = cnaAssignments.find((item) => item.id === entry.assignmentId);
+  if (!assignment) {
+    return null;
+  }
+  return {
+    id: `debrief-${entry.assignmentId}`,
+    kind: "debrief",
+    title: `${assignment.resident.name} · Debrief needed`,
+    residentId: assignment.resident.id,
+    residentName: assignment.resident.name,
+    facility: assignment.facility,
+    body: entry.flaggedConcern || assignment.watchFor,
+    meta: `Room ${assignment.resident.room} · ${assignment.care}`,
+    status: cnaStatusLabel(entry.status),
+    tone: entry.status === "flagged" ? "danger" : "warning",
+    rank: entry.status === "flagged" ? 90 : 55,
+    primaryAction: "open-debrief",
+    primaryLabel: entry.status === "flagged" ? "Review debrief" : "Start debrief",
+    secondaryAction: "review-resident",
+    secondaryLabel: "View chart",
+    sourceId: entry.assignmentId,
+  };
+}
+
+function focusItemFromEscalation(escalation: HospitalEscalation): FocusItem {
+  return {
+    id: `escalation-${escalation.id}`,
+    kind: "escalation",
+    title: `${escalation.residentName} · ${escalation.destination}`,
+    residentId: escalation.residentId,
+    residentName: escalation.residentName,
+    facility: escalation.facility,
+    body: escalation.reason,
+    meta: `${escalation.createdAt} · ${escalation.followUpTime}`,
+    status: escalation.status.replaceAll("-", " "),
+    tone: "danger",
+    rank: focusRankForPriority(escalation.urgency) + 5,
+    primaryAction: "review-resident",
+    primaryLabel: "Review chart",
+    sourceId: escalation.id,
+  };
 }
 
 function userRoleLabel(userId: string) {
@@ -2003,8 +2572,93 @@ function residentTag(resident: Resident) {
   return `@${resident.name}`;
 }
 
+function opportunitySourceSummary(opportunity: ProviderOpportunity) {
+  const sources = [...new Set(opportunity.evidence.map((event) => event.source))] as IntelligenceSource[];
+  return sources.join(" + ");
+}
+
+function facilitySummarySourceText(summary: FacilityIntelligenceSummary) {
+  return summary.sources.length ? summary.sources.join(" + ") : "No source evidence";
+}
+
+function facilityReadinessLabel(summary: FacilityIntelligenceSummary) {
+  if (summary.readinessScore >= 70) {
+    return "ready";
+  }
+  if (summary.readinessScore >= 35) {
+    return "partial";
+  }
+  return "limited";
+}
+
+function facilitySourceCoverageText(summary: FacilityIntelligenceSummary) {
+  return `${summary.readinessScore}% source coverage · ${summary.residentsCovered}/${summary.totalResidents} residents`;
+}
+
+function facilitySourceMixText(summary: FacilityIntelligenceSummary) {
+  return `PCC ${summary.pccEvents} · Staff ${summary.staffInputs} · Provider ${summary.providerInputs}`;
+}
+
+function facilityInputGapText(summary: FacilityIntelligenceSummary) {
+  return summary.inputGaps.length ? summary.inputGaps.join(" · ") : "Source coverage sufficient for active predictions";
+}
+
+function actionForOpportunity(opportunity: ProviderOpportunity) {
+  return actionByOpportunityId.value.get(opportunity.id) ?? null;
+}
+
+function opportunityActionStatusLabel(opportunity: ProviderOpportunity) {
+  const action = actionForOpportunity(opportunity);
+  if (!action) {
+    return "No action assigned";
+  }
+  return `Action ${actionStatusLabel(action.status)}`;
+}
+
+function reviewOpportunityAction(opportunity: ProviderOpportunity) {
+  const action = actionForOpportunity(opportunity);
+  if (action) {
+    reviewActionResident(action);
+  }
+}
+
+function opportunityEvidenceGroups(opportunity: ProviderOpportunity) {
+  const groups: Array<{ source: IntelligenceSource; events: ResidentSourceEvent[] }> = [];
+  opportunity.evidence.forEach((event) => {
+    const group = groups.find((entry) => entry.source === event.source);
+    if (group) {
+      group.events.push(event);
+      return;
+    }
+    groups.push({ source: event.source, events: [event] });
+  });
+  return groups;
+}
+
+function opportunityEvidenceItemText(event: ResidentSourceEvent) {
+  return `${event.capturedAt}: ${event.label} - ${event.detail}`;
+}
+
+function opportunityEvidenceText(event: ResidentSourceEvent) {
+  return `${event.source} · ${opportunityEvidenceItemText(event)}`;
+}
+
 function actionResident(action: ActionRequest) {
   return residents.find((resident) => resident.id === action.residentId) ?? null;
+}
+
+function reviewActionResident(action: ActionRequest) {
+  const resident = actionResident(action);
+  if (resident) {
+    openResident(resident);
+  }
+}
+
+function assignImmediateActionFromRequest(action: ActionRequest) {
+  const resident = actionResident(action);
+  if (resident) {
+    openActionRequestModal(resident, "DON Situation", action.assignedRole);
+  }
 }
 
 function actionSourceResidentFromThread() {
@@ -2186,6 +2840,358 @@ function scheduleItemsForRole(role: RoleKey): ResidentScheduleItem[] {
   return [...huddleItems, ...followUpItems, ...orderItems, ...escalationItems, ...actionItems]
     .filter((item) => residentVisibleForRole(role, item.residentId, item.facility))
     .sort((a, b) => `${a.dateKey} ${a.timeLabel}`.localeCompare(`${b.dateKey} ${b.timeLabel}`));
+}
+
+function careUpdateBodyForProviderNote(note: ProviderNote) {
+  if (selectedRole.value === "cna") {
+    return `Provider note shared for care context: ${note.body}`;
+  }
+  return note.body;
+}
+
+function timelineSummary(text: string, maxLength = 168) {
+  const clean = text.trim().replace(/\s+/g, " ");
+  if (clean.length <= maxLength) {
+    return clean;
+  }
+
+  const sentenceMatches = clean.match(/[^.!?]+[.!?]+/g);
+  const summary = sentenceMatches?.slice(0, 2).join(" ").trim() || clean.slice(0, maxLength).trim();
+  return summary.length > maxLength ? `${summary.slice(0, maxLength - 3).trim()}...` : summary;
+}
+
+function minutesFromTimeText(label: string) {
+  const match = label.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+  if (!match) {
+    return null;
+  }
+
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? 0);
+  const meridiem = match[3].toLowerCase();
+  if (meridiem === "pm" && hour < 12) {
+    hour += 12;
+  }
+  if (meridiem === "am" && hour === 12) {
+    hour = 0;
+  }
+  return hour * 60 + minute;
+}
+
+function timelineSortFromLabel(label: string, fallback: number) {
+  const normalized = label.toLowerCase();
+  if (normalized.includes("now")) {
+    return 400000;
+  }
+
+  const minuteAgoMatch = normalized.match(/(\d+)\s*min/);
+  if (minuteAgoMatch) {
+    return 390000 - Number(minuteAgoMatch[1]);
+  }
+
+  const hourAgoMatch = normalized.match(/(\d+)\s*hour/);
+  if (hourAgoMatch) {
+    return 390000 - Number(hourAgoMatch[1]) * 60;
+  }
+
+  const timeMinutes = minutesFromTimeText(label);
+  if (timeMinutes !== null) {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const elapsedMinutes = Math.max(0, currentMinutes - timeMinutes);
+    return 380000 - elapsedMinutes;
+  }
+
+  if (normalized.includes("yesterday")) {
+    return 100000 + fallback;
+  }
+
+  return fallback;
+}
+
+function timelineEventFromStaticResidentEvent(
+  event: Resident["timeline"][number],
+  index: number,
+): ResidentTimelineEvent {
+  return {
+    id: `resident-${event.id}`,
+    timeAgo: event.timeAgo,
+    period: event.period,
+    icon: event.icon,
+    title: "Resident signal",
+    text: event.text,
+    interpretation: event.interpretation,
+    tone: statusTone(event.period),
+    sortOrder: timelineSortFromLabel(event.timeAgo, 50000 - index),
+  };
+}
+
+function timelineEventsForResident(resident: Resident) {
+  const events: ResidentTimelineEvent[] = resident.timeline.map((event, index) =>
+    timelineEventFromStaticResidentEvent(event, index),
+  );
+
+  cnaDebriefs.value.forEach((entry, index) => {
+    if (entry.residentId !== resident.id || !entry.transcript.trim()) {
+      return;
+    }
+    const assignment = cnaAssignments.find((item) => item.id === entry.assignmentId);
+    const capturedAt = entry.capturedAt ?? "Current shift";
+    events.push({
+      id: `timeline-debrief-${entry.assignmentId}`,
+      timeAgo: capturedAt,
+      period: "CNA debrief",
+      icon: "file-text",
+      title: `${assignment?.resident.name ?? resident.name} shift debrief`,
+      text: `CNA debrief summary: ${timelineSummary(entry.transcript)}`,
+      interpretation: entry.flaggedConcern || undefined,
+      status: cnaStatusLabel(entry.status),
+      tone: entry.status === "flagged" ? "danger" : "success",
+      sortOrder: timelineSortFromLabel(capturedAt, 360000 - index),
+    });
+  });
+
+  providerNotesState.value.forEach((note, index) => {
+    if (note.residentId !== resident.id) {
+      return;
+    }
+    events.push({
+      id: `timeline-note-${note.id}`,
+      timeAgo: note.createdAt,
+      period: "Provider note",
+      icon: "file-text",
+      title: note.title,
+      text: `Provider ${providerNoteSourceLabel(note.source).toLowerCase()} summary: ${timelineSummary(note.body)}`,
+      interpretation: note.encounterDraft
+        ? `Encounter draft created for ${note.encounterDraft.destination}: ${timelineSummary(note.encounterDraft.body, 120)}`
+        : undefined,
+      status: note.status.replaceAll("-", " "),
+      tone: statusTone(note.status),
+      sortOrder: timelineSortFromLabel(note.createdAt, 350000 - index),
+    });
+  });
+
+  clinicalOrders.value.forEach((order, index) => {
+    if (order.residentId !== resident.id) {
+      return;
+    }
+    const eventTime = order.statusChangedAt ?? order.createdAt;
+    events.push({
+      id: `timeline-order-${order.id}`,
+      timeAgo: eventTime,
+      period: "Provider order",
+      icon: "file-text",
+      title: `${order.orderType} order`,
+      text: `Order ${order.status.replaceAll("-", " ")}: ${timelineSummary(`${order.details} ${order.instructions}`)}`,
+      interpretation: order.indication ? `Indication: ${timelineSummary(order.indication, 120)}` : undefined,
+      status: order.status.replaceAll("-", " "),
+      tone: statusTone(order.status),
+      sortOrder: timelineSortFromLabel(eventTime, 340000 - index),
+    });
+  });
+
+  actionRequests.value.forEach((action, index) => {
+    if (action.residentId !== resident.id) {
+      return;
+    }
+    const eventTime = action.statusChangedAt ?? action.updatedAt ?? action.createdAt;
+    events.push({
+      id: `timeline-action-${action.id}`,
+      timeAgo: eventTime,
+      period: "Shared action",
+      icon: action.status === "flagged" ? "alert-triangle" : "check-circle",
+      title: action.actionType,
+      text: `Action ${actionStatusLabel(action.status)} for ${actionAssigneeName(action)}: ${timelineSummary(action.instructions)}`,
+      interpretation: action.statusNote
+        ? `${action.status === "flagged" ? "Concern" : "Update"}: ${timelineSummary(action.statusNote, 120)}`
+        : undefined,
+      status: actionStatusLabel(action.status),
+      tone: statusTone(action.status),
+      sortOrder: timelineSortFromLabel(eventTime, 330000 - index),
+    });
+  });
+
+  hospitalEscalations.value.forEach((escalation, index) => {
+    if (escalation.residentId !== resident.id) {
+      return;
+    }
+    events.push({
+      id: `timeline-escalation-${escalation.id}`,
+      timeAgo: escalation.createdAt,
+      period: "Escalation",
+      icon: "alert-triangle",
+      title: escalation.destination,
+      text: `Escalation ${escalation.status.replaceAll("-", " ")}: ${timelineSummary(escalation.reason)}`,
+      interpretation: escalation.notes ? timelineSummary(escalation.notes, 120) : undefined,
+      status: escalation.status.replaceAll("-", " "),
+      tone: "danger",
+      sortOrder: timelineSortFromLabel(escalation.createdAt, 320000 - index),
+    });
+  });
+
+  scheduledHuddles.value.forEach((huddle, index) => {
+    if (huddle.residentId !== resident.id) {
+      return;
+    }
+    events.push({
+      id: `timeline-huddle-${huddle.id}`,
+      timeAgo: huddle.createdAt,
+      period: "Care huddle",
+      icon: "users",
+      title: huddle.title,
+      text: `Huddle ${huddle.status}: ${timelineSummary(huddle.agenda)}`,
+      interpretation: `${huddle.scheduledFor} · ${assignmentSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}`,
+      status: huddle.status,
+      tone: statusTone(huddle.status),
+      sortOrder: timelineSortFromLabel(huddle.createdAt, 310000 - index),
+    });
+  });
+
+  scheduleFollowUps.value.forEach((followUp, index) => {
+    if (followUp.residentId !== resident.id) {
+      return;
+    }
+    events.push({
+      id: `timeline-followup-${followUp.id}`,
+      timeAgo: followUp.createdAt,
+      period: "Follow-up",
+      icon: "clock",
+      title: followUp.title,
+      text: `Follow-up ${followUp.status}: ${timelineSummary(followUp.details)}`,
+      interpretation: `${formatDateTimeLabel(followUp.scheduledDate, followUp.scheduledTime)} · ${assignmentSummary(followUp.primaryOwnerId, followUp.taggedUserIds)}`,
+      status: followUp.status,
+      tone: statusTone(followUp.status),
+      sortOrder: timelineSortFromLabel(followUp.createdAt, 300000 - index),
+    });
+  });
+
+  return events.sort((a, b) => b.sortOrder - a.sortOrder);
+}
+
+function careUpdatesForResident(residentId: string) {
+  const updates: CareUpdate[] = [];
+
+  cnaDebriefs.value.forEach((entry, index) => {
+    if (entry.residentId !== residentId || !entry.transcript.trim()) {
+      return;
+    }
+    const assignment = cnaAssignments.find((item) => item.id === entry.assignmentId);
+    updates.push({
+      id: `debrief-${entry.assignmentId}`,
+      kind: "debrief",
+      label: "CNA Debrief",
+      title: `${assignment?.resident.name ?? "Resident"} shift debrief`,
+      body: entry.transcript,
+      meta: `${entry.capturedAt ?? "Captured"} · ${assignment?.watchFor ?? "Shared observation"}`,
+      status: cnaStatusLabel(entry.status),
+      tone: entry.status === "flagged" ? "danger" : "success",
+      sortOrder: 10000 - index,
+    });
+  });
+
+  providerNotesState.value.forEach((note, index) => {
+    if (note.residentId !== residentId) {
+      return;
+    }
+    updates.push({
+      id: `note-${note.id}`,
+      kind: "provider-note",
+      label: "Provider Note",
+      title: note.title,
+      body: careUpdateBodyForProviderNote(note),
+      meta: `${providerNoteSourceLabel(note.source)} · ${note.createdAt}`,
+      status: note.source === "voice" ? "voice note" : "shared note",
+      tone: "success",
+      sortOrder: 9000 - index,
+    });
+  });
+
+  clinicalOrders.value.forEach((order, index) => {
+    if (order.residentId !== residentId) {
+      return;
+    }
+    updates.push({
+      id: `order-${order.id}`,
+      kind: "order",
+      label: "Order Update",
+      title: `${order.orderType} order placed`,
+      body: `${order.eventType} was added to Orders & Follow-ups.`,
+      meta: `${formatDateTimeLabel(order.requestedDate, order.requestedTime)} · ${assignmentSummary(order.primaryOwnerId, order.taggedUserIds)}`,
+      status: order.status.replaceAll("-", " "),
+      tone: statusTone(order.status),
+      sortOrder: 8000 - index,
+    });
+  });
+
+  actionRequests.value.forEach((action, index) => {
+    if (action.residentId !== residentId) {
+      return;
+    }
+    updates.push({
+      id: `action-${action.id}`,
+      kind: "action",
+      label: "Action Update",
+      title: `${action.actionType} assigned`,
+      body: `${actionAssigneeName(action)} owns this in Shared Actions.`,
+      meta: `${action.updatedAt} · ${action.dueTime}`,
+      status: actionStatusLabel(action.status),
+      tone: statusTone(action.status),
+      sortOrder: 7000 - index,
+    });
+  });
+
+  hospitalEscalations.value.forEach((escalation, index) => {
+    if (escalation.residentId !== residentId) {
+      return;
+    }
+    updates.push({
+      id: `escalation-${escalation.id}`,
+      kind: "escalation",
+      label: "Escalation",
+      title: escalation.destination,
+      body: `${escalation.reason}${escalation.notes ? ` ${escalation.notes}` : ""}`,
+      meta: `${escalation.createdAt} · ${escalation.followUpTime || "No follow-up time"}`,
+      status: escalation.status.replaceAll("-", " "),
+      tone: "danger",
+      sortOrder: 6000 - index,
+    });
+  });
+
+  scheduledHuddles.value.forEach((huddle, index) => {
+    if (huddle.residentId !== residentId) {
+      return;
+    }
+    updates.push({
+      id: `huddle-${huddle.id}`,
+      kind: "huddle",
+      label: "Huddle Update",
+      title: `${huddle.eventType} huddle scheduled`,
+      body: "Care-team huddle added to Orders & Follow-ups.",
+      meta: `${huddle.scheduledFor} · ${assignmentSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}`,
+      status: huddle.status,
+      tone: statusTone(huddle.status),
+      sortOrder: 5000 - index,
+    });
+  });
+
+  scheduleFollowUps.value.forEach((followUp, index) => {
+    if (followUp.residentId !== residentId) {
+      return;
+    }
+    updates.push({
+      id: `followup-${followUp.id}`,
+      kind: "follow-up",
+      label: "Follow-up Update",
+      title: `${followUp.eventType} follow-up scheduled`,
+      body: "Follow-up task added to Orders & Follow-ups.",
+      meta: `${formatDateTimeLabel(followUp.scheduledDate, followUp.scheduledTime)} · ${assignmentSummary(followUp.primaryOwnerId, followUp.taggedUserIds)}`,
+      status: followUp.status,
+      tone: statusTone(followUp.status),
+      sortOrder: 4000 - index,
+    });
+  });
+
+  return updates.sort((a, b) => b.sortOrder - a.sortOrder);
 }
 
 function padDatePart(value: number) {
@@ -2414,14 +3420,12 @@ function closeScheduleModal() {
   editingClinicalOrderId.value = null;
 }
 
-function handleScheduleTypeChange(event: Event) {
-  const nextType = (event.target as HTMLSelectElement).value as ScheduleDraftType;
+function setScheduleType(nextType: string) {
   const resident = residents.find((entry) => entry.id === scheduleDraft.value.residentId) ?? null;
-  resetScheduleDraft(nextType, resident, scheduleDraft.value.date || todayDateKey());
+  resetScheduleDraft(nextType as ScheduleDraftType, resident, scheduleDraft.value.date || todayDateKey());
 }
 
-function handleScheduleEventTypeChange(event: Event) {
-  const eventType = (event.target as HTMLSelectElement).value;
+function setScheduleEventType(eventType: string) {
   scheduleDraft.value.eventType = eventType;
   if (scheduleDraft.value.type === "clinical-order" && clinicalOrderTypes.includes(eventType as ClinicalOrderType)) {
     scheduleDraft.value.orderType = eventType as ClinicalOrderType;
@@ -2481,7 +3485,7 @@ function createOrderContextThread(order: ClinicalOrder) {
     (id) => id !== activeStaffUser.value.id,
   );
   const resident = residents.find((entry) => entry.id === order.residentId) ?? residents[0];
-  const text = `Provider order draft: ${residentTag(resident)} - ${order.eventType}. ${order.indication}`;
+  const text = `Provider order placed: ${residentTag(resident)} - ${order.eventType}. ${order.indication}`;
   const thread: Thread = {
     id: `order-thread-${Date.now()}`,
     kind: "huddle",
@@ -2551,7 +3555,7 @@ function saveClinicalOrderDraft() {
     details: scheduleDraft.value.orderDetails.trim(),
     instructions: scheduleDraft.value.instructions.trim(),
     destination: "Otangeles Notes+",
-    status: "draft",
+    status: "ordered",
     createdAt: currentTimeLabel(),
   };
   order.linkedThreadId = createOrderContextThread(order);
@@ -2680,84 +3684,57 @@ function openHuddleModal(resident: Resident) {
   openScheduleModal("huddle", resident);
 }
 
-function closeHuddleModal() {
-  huddleModalResidentId.value = null;
+function residentCoordinationThreadId(resident: Resident) {
+  const existingResidentHuddle = scheduledHuddles.value.find(
+    (huddle) =>
+      huddle.residentId === resident.id &&
+      visibleThreads.value.some((thread) => thread.id === huddle.threadId && thread.kind === "huddle"),
+  );
+  return existingResidentHuddle?.threadId ?? `resident-thread-${resident.id}`;
 }
 
-function toggleHuddleParticipant(userId: string) {
-  huddleDraft.value.participantIds = huddleDraft.value.participantIds.includes(userId)
-    ? huddleDraft.value.participantIds.filter((id) => id !== userId)
-    : [...huddleDraft.value.participantIds, userId];
-}
-
-function createScheduledHuddleThread(huddle: ScheduledHuddle, startNow: boolean) {
-  const message = `Scheduled ${huddle.eventType}: ${residentTag(residents.find((resident) => resident.id === huddle.residentId) ?? residents[0])} - ${huddle.title} at ${huddle.scheduledFor}. ${assignmentSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}. Agenda: ${huddle.agenda}`;
-  const messages: ThreadMessage[] = [
-    {
-      id: `m-${Date.now()}`,
-      authorId: "me",
-      text: message,
-      ts: "now",
-    },
-  ];
-  if (startNow) {
-    messages.push(callMessage(huddle.callMode));
-  }
-
-  const thread: Thread = {
-    id: huddle.threadId,
-    kind: "huddle",
-    title: huddle.title,
-    members: ["me", ...huddle.participantIds.filter((id) => id !== activeStaffUser.value.id)],
-    lastMessage: startNow
-      ? huddle.callMode === "video-call"
-        ? "Group video call started"
-        : "Group voice call started"
-      : message,
-    lastTs: "now",
-    unread: 0,
-    messages,
-  };
+function ensureResidentCoordinationThread(resident: Resident, participantIds: string[]) {
+  const threadId = residentCoordinationThreadId(resident);
+  const existingThread = visibleThreads.value.find((thread) => thread.id === threadId);
+  const members = uniqueIds([
+    "me",
+    ...(existingThread?.members ?? []),
+    ...participantIds.filter((id) => id !== activeStaffUser.value.id),
+  ]);
+  const thread: Thread = existingThread
+    ? {
+        ...existingThread,
+        kind: "huddle",
+        members,
+      }
+    : {
+        id: threadId,
+        kind: "huddle",
+        title: `${resident.name} care team`,
+        members,
+        lastMessage: `Care-team coordination for ${residentTag(resident)}.`,
+        lastTs: "now",
+        unread: 0,
+        messages: [],
+      };
   createLocalThread(thread);
   return thread;
 }
 
-function saveScheduledHuddle(startNow = false) {
-  const resident = huddleModalResident.value;
-  if (!resident || !huddleDraft.value.title.trim() || huddleDraft.value.participantIds.length === 0) {
-    return;
-  }
-
-  const stamp = Date.now();
-  const huddle: ScheduledHuddle = {
-    id: `sh-${stamp}`,
-    residentId: resident.id,
-    residentName: resident.name,
-    facility: residentFacility(resident),
-    eventType: "Care Huddle",
-    primaryOwnerId: huddleDraft.value.participantIds[0] ?? activeStaffUser.value.id,
-    taggedUserIds: huddleDraft.value.participantIds.slice(1),
-    title: huddleDraft.value.title.trim(),
-    scheduledDate: scheduleDateKeyFromText(huddleDraft.value.scheduledFor.trim() || "Today"),
-    scheduledTime: "14:00",
-    scheduledFor: huddleDraft.value.scheduledFor.trim() || "Today",
-    duration: huddleDraft.value.duration.trim() || "20 min",
-    participantIds: [...huddleDraft.value.participantIds],
-    callMode: huddleDraft.value.callMode,
-    agenda: huddleDraft.value.agenda.trim() || `Discuss ${resident.name}'s current status and next care-team actions.`,
-    status: startNow ? "started" : "scheduled",
-    threadId: `huddle-thread-${stamp}`,
-    createdAt: currentTimeLabel(),
-  };
-  const thread = createScheduledHuddleThread(huddle, startNow);
-  scheduledHuddles.value = [huddle, ...scheduledHuddles.value];
-  closeHuddleModal();
-
+function createScheduledHuddleThread(huddle: ScheduledHuddle, startNow: boolean) {
+  const resident = residents.find((entry) => entry.id === huddle.residentId) ?? residents[0];
+  const thread = ensureResidentCoordinationThread(resident, huddle.participantIds);
+  const message = `Scheduled ${huddle.eventType}: ${residentTag(resident)} - ${huddle.title} at ${huddle.scheduledFor}. ${assignmentSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}. Agenda: ${huddle.agenda}`;
+  appendThreadMessage(thread.id, {
+    id: `huddle-${huddle.id}`,
+    authorId: "me",
+    text: message,
+    ts: "now",
+  });
   if (startNow) {
-    setView(roleMessagesView());
-    messageTab.value = "threads";
-    openThread(thread);
+    appendThreadMessage(thread.id, callMessage(huddle.callMode));
   }
+  return visibleThreads.value.find((entry) => entry.id === thread.id) ?? thread;
 }
 
 function saveScheduledHuddleFromScheduleDraft(startNow = false) {
@@ -2768,6 +3745,7 @@ function saveScheduledHuddleFromScheduleDraft(startNow = false) {
 
   const stamp = Date.now();
   const participantIds = scheduleParticipantIds();
+  const threadId = residentCoordinationThreadId(resident);
   const huddle: ScheduledHuddle = {
     id: `sh-${stamp}`,
     residentId: resident.id,
@@ -2785,7 +3763,7 @@ function saveScheduledHuddleFromScheduleDraft(startNow = false) {
     callMode: scheduleDraft.value.callMode,
     agenda: scheduleDraft.value.details.trim() || `Discuss ${resident.name}'s current status and next care-team actions.`,
     status: startNow ? "started" : "scheduled",
-    threadId: `huddle-thread-${stamp}`,
+    threadId,
     createdAt: currentTimeLabel(),
   };
   const thread = createScheduledHuddleThread(huddle, startNow);
@@ -2830,6 +3808,24 @@ function orderForScheduleItem(item: ResidentScheduleItem) {
   return clinicalOrders.value.find((order) => order.id === item.id) ?? null;
 }
 
+function orderStatusForScheduleItem(item: ResidentScheduleItem) {
+  return orderForScheduleItem(item)?.status ?? "ordered";
+}
+
+function openClinicalOrderFromScheduleItem(item: ResidentScheduleItem) {
+  const order = orderForScheduleItem(item);
+  if (order) {
+    openClinicalOrderDraft(order);
+  }
+}
+
+function updateClinicalOrderFromScheduleItem(item: ResidentScheduleItem, status: ClinicalOrderStatus) {
+  const order = orderForScheduleItem(item);
+  if (order) {
+    updateClinicalOrderStatus(order, status);
+  }
+}
+
 function openScheduleItem(item: ResidentScheduleItem) {
   if (item.kind === "order") {
     const order = orderForScheduleItem(item);
@@ -2839,6 +3835,84 @@ function openScheduleItem(item: ResidentScheduleItem) {
     }
   }
   openResident(item.residentId);
+}
+
+function isSectionExpanded(key: string, defaultOpen = false) {
+  return expandedSections.value[key] ?? defaultOpen;
+}
+
+function toggleSection(key: string, defaultOpen = false) {
+  expandedSections.value[key] = !isSectionExpanded(key, defaultOpen);
+}
+
+function setSituationAccordion(key: SituationAccordionKey) {
+  openSituationAccordion.value = key;
+}
+
+function setProviderHomeAccordion(key: ProviderHomeAccordionKey) {
+  openProviderHomeAccordion.value = key;
+}
+
+function residentSectionKey(section: string) {
+  return selectedResident.value ? `resident-${selectedResident.value.id}-${section}` : `resident-${section}`;
+}
+
+function focusItemOpportunity(item: FocusItem) {
+  return item.sourceId
+    ? providerOpportunities.value.find((opportunity) => opportunity.id === item.sourceId) ?? null
+    : null;
+}
+
+function focusItemAction(item: FocusItem) {
+  return item.sourceId
+    ? actionRequests.value.find((action) => action.id === item.sourceId) ?? null
+    : null;
+}
+
+function handleFocusItemAction(item: FocusItem, action = item.primaryAction) {
+  if (action === "create-action") {
+    const opportunity = focusItemOpportunity(item);
+    if (opportunity) {
+      openActionRequestFromOpportunity(opportunity, `${activeRole.value.label} Focus`);
+    }
+    return;
+  }
+
+  if (action === "review-action") {
+    const opportunity = focusItemOpportunity(item);
+    if (opportunity) {
+      reviewOpportunityAction(opportunity);
+      return;
+    }
+    const actionRequest = focusItemAction(item);
+    if (actionRequest) {
+      reviewActionResident(actionRequest);
+    }
+    return;
+  }
+
+  if (action === "open-debrief") {
+    if (item.sourceId) {
+      selectedCnaAssignmentId.value = item.sourceId;
+    }
+    activeView.value = "cna-debrief";
+    selectedResidentId.value = null;
+    return;
+  }
+
+  if (action === "open-schedule") {
+    const scheduleItem = item.sourceId
+      ? visibleScheduleItems.value.find((entry) => entry.id === item.sourceId)
+      : null;
+    if (scheduleItem) {
+      openScheduleItem(scheduleItem);
+      return;
+    }
+  }
+
+  if (item.residentId) {
+    openResident(item.residentId);
+  }
 }
 
 function requestOrderReview(resident: Resident) {
@@ -2872,13 +3946,16 @@ function openOrderAction(resident: Resident) {
 }
 
 function updateClinicalOrderStatus(order: ClinicalOrder, status: ClinicalOrderStatus) {
+  const now = currentTimeLabel();
   order.status = status;
+  order.statusChangedAt = now;
+  order.statusChangedById = activeStaffUser.value.id;
   if (order.linkedThreadId) {
     appendThreadMessage(order.linkedThreadId, {
       id: `order-status-${Date.now()}`,
       authorId: "me",
-      text: `${order.residentName} ${order.orderType} order marked ${status} for ${order.destination}.`,
-      ts: "now",
+      text: `${order.residentName} ${order.orderType} order marked ${status.replaceAll("-", " ")} in the shared care plan.`,
+      ts: now,
     });
   }
 }
@@ -2963,11 +4040,63 @@ function resetActionDraft(resident: Resident, sourceScreen: string, assignedRole
         ? `Review ${resident.name}'s current change and document the next clinical decision.`
         : `Capture direct observation for ${resident.name} and report anything unusual.`,
     createThread: true,
+    sourceOpportunityId: undefined,
   };
 }
 
 function openActionRequestModal(resident: Resident, sourceScreen: string, assignedRole: ActionTargetRole = "provider") {
   resetActionDraft(resident, sourceScreen, assignedRole);
+}
+
+function actionTypeForOpportunity(opportunity: ProviderOpportunity) {
+  const category = opportunity.category.toLowerCase();
+  if (category.includes("acute")) {
+    return "Evaluate acute change";
+  }
+  if (category.includes("fall")) {
+    return "Review labs/imaging";
+  }
+  if (category.includes("follow-up") || category.includes("trend")) {
+    return "Review resident";
+  }
+  return providerActionTypes[0];
+}
+
+function priorityForOpportunity(opportunity: ProviderOpportunity): ActionPriority {
+  if (opportunity.urgency === "urgent") {
+    return "Stat";
+  }
+  if (opportunity.urgency === "high") {
+    return "High";
+  }
+  return "Routine";
+}
+
+function dueTimeForOpportunity(opportunity: ProviderOpportunity) {
+  if (opportunity.urgency === "urgent") {
+    return "Now";
+  }
+  if (opportunity.urgency === "high") {
+    return "Before end of shift";
+  }
+  return "Today";
+}
+
+function openActionRequestFromOpportunity(opportunity: ProviderOpportunity, sourceScreen = "Sage Prediction") {
+  resetActionDraft(opportunity.resident, sourceScreen, "provider");
+  actionDraft.value = {
+    ...actionDraft.value,
+    assignedUserId: providerRecipientIds[0] ?? "u4",
+    actionType: actionTypeForOpportunity(opportunity),
+    priority: priorityForOpportunity(opportunity),
+    dueTime: dueTimeForOpportunity(opportunity),
+    instructions: `${opportunity.recommendedAction} Evidence: ${opportunity.evidence
+      .slice(0, 3)
+      .map((event) => `${event.label} - ${event.detail}`)
+      .join("; ")}.`,
+    createThread: true,
+    sourceOpportunityId: opportunity.id,
+  };
 }
 
 function openActionRequestFromThread() {
@@ -2986,10 +4115,6 @@ function setActionAssignedRole(role: ActionTargetRole) {
   actionDraft.value.assignedRole = role;
   actionDraft.value.assignedUserId = role === "provider" ? providerRecipientIds[0] ?? "u4" : cnaRecipientIds[0] ?? "u3";
   actionDraft.value.actionType = role === "provider" ? providerActionTypes[0] : cnaActionTypes[0];
-}
-
-function handleActionRoleChange(event: Event) {
-  setActionAssignedRole((event.target as HTMLSelectElement).value as ActionTargetRole);
 }
 
 function createActionThread(action: ActionRequest) {
@@ -3035,6 +4160,7 @@ function createActionRequest() {
     dueTime: actionDraft.value.dueTime.trim() || "Today",
     status: "open",
     sourceScreen: actionModalSource.value,
+    sourceOpportunityId: actionDraft.value.sourceOpportunityId,
     createdAt: now,
     updatedAt: now,
   };
@@ -3055,26 +4181,89 @@ function createActionRequest() {
   actionModalSource.value = null;
 }
 
-function updateActionStatus(action: ActionRequest, status: ActionStatus) {
+function shouldUseCnaActionStatusFlow(action: ActionRequest) {
+  return selectedRole.value === "cna" && action.assignedRole === "cna";
+}
+
+function actionCompleteLabel(action: ActionRequest) {
+  return shouldUseCnaActionStatusFlow(action) ? "Complete care" : "Done";
+}
+
+function actionFlagLabel(action: ActionRequest) {
+  return shouldUseCnaActionStatusFlow(action) ? "Report concern" : "Flag";
+}
+
+function openActionStatusModal(action: ActionRequest, status: ActionStatusUpdateTarget) {
+  actionStatusDraft.value = {
+    actionId: action.id,
+    status,
+    note: "",
+  };
+}
+
+function closeActionStatusModal() {
+  actionStatusDraft.value = {
+    actionId: "",
+    status: "completed",
+    note: "",
+  };
+}
+
+function handleActionStatusSelection(action: ActionRequest, status: ActionStatusUpdateTarget) {
+  if (shouldUseCnaActionStatusFlow(action)) {
+    openActionStatusModal(action, status);
+    return;
+  }
+
+  updateActionStatus(action, status);
+}
+
+function actionStatusThreadText(action: ActionRequest, status: ActionStatus, note: string) {
+  const statusNote = note ? ` Note: ${note}` : "";
+  if (shouldUseCnaActionStatusFlow(action) && status === "completed") {
+    return `${actionAssigneeName(action)} completed care action for @${action.residentName}: ${action.actionType}.${statusNote}`;
+  }
+  if (shouldUseCnaActionStatusFlow(action) && status === "flagged") {
+    return `${actionAssigneeName(action)} reported concern for @${action.residentName}: ${action.actionType}.${statusNote}`;
+  }
+  return `${actionAssigneeName(action)} marked @${action.residentName} ${action.actionType} as ${actionStatusLabel(status)}.${statusNote}`;
+}
+
+function updateActionStatus(action: ActionRequest, status: ActionStatus, note = "") {
+  const now = currentTimeLabel();
+  const statusNote = note.trim();
   action.status = status;
-  action.updatedAt = currentTimeLabel();
+  action.updatedAt = now;
+  action.statusChangedAt = now;
+  action.statusChangedById = activeStaffUser.value.id;
+  action.statusNote = statusNote || undefined;
   if (action.linkedThreadId) {
     appendThreadMessage(action.linkedThreadId, {
       id: `status-${Date.now()}`,
       authorId: "me",
-      text: `${actionAssigneeName(action)} marked @${action.residentName} ${action.actionType} as ${status.replace("-", " ")}.`,
+      text: actionStatusThreadText(action, status, statusNote),
       ts: "now",
     });
   }
 }
 
+function submitActionStatusUpdate() {
+  const action = actionStatusModalAction.value;
+  if (!action || !actionStatusCanSubmit.value) {
+    return;
+  }
+
+  updateActionStatus(action, actionStatusDraft.value.status, actionStatusDraft.value.note);
+  closeActionStatusModal();
+}
+
 function setView(view: ViewName) {
   profileMenuOpen.value = false;
   escalationModalResidentId.value = null;
-  huddleModalResidentId.value = null;
   scheduleModalOpen.value = false;
   editingClinicalOrderId.value = null;
   selectedScheduleDateKey.value = null;
+  closeActionStatusModal();
   activeView.value = view;
   selectedResidentId.value = null;
   if (!["messages", "provider-collaboration", "cna-messages"].includes(view)) {
@@ -3085,7 +4274,6 @@ function setView(view: ViewName) {
 function selectRole(role: RoleKey) {
   profileMenuOpen.value = false;
   escalationModalResidentId.value = null;
-  huddleModalResidentId.value = null;
   scheduleModalOpen.value = false;
   editingClinicalOrderId.value = null;
   selectedScheduleDateKey.value = null;
@@ -3100,10 +4288,6 @@ function selectRole(role: RoleKey) {
   if (residentTab.value === "notes" && role !== "provider") {
     residentTab.value = "situation";
   }
-}
-
-function handleLoginRoleChange(event: Event) {
-  selectRole((event.target as HTMLSelectElement).value as RoleKey);
 }
 
 function login() {
@@ -3131,25 +4315,33 @@ function openResident(residentOrId: Resident | string) {
 
   selectedResidentId.value = resident.id;
   residentTab.value = "situation";
+  residentContextTab.value = "updates";
   residentChat.value = [...resident.talk];
   workingCareSteps.value = { ...resident.careSteps };
-  selectedProviderNoteId.value =
-    providerNotesState.value.find((note) => note.residentId === resident.id)?.id ?? null;
+  expandedProviderNoteId.value = null;
+  encounterModalNoteId.value = null;
+  deleteProviderNoteId.value = null;
   providerTranscript.value = "";
   providerNoteDraft.value = "";
   assignedNurse.value = null;
   openClarify.value = null;
-}
-
-function openResidentNotes(resident: Resident) {
-  openResident(resident);
-  if (selectedRole.value === "provider") {
-    residentTab.value = "notes";
-  }
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  });
 }
 
 function closeResident() {
   selectedResidentId.value = null;
+}
+
+function openProviderHomeNote(note: ProviderNote) {
+  const resident = residents.find((entry) => entry.id === note.residentId);
+  if (!resident) {
+    return;
+  }
+  openResident(resident);
+  residentTab.value = "notes";
+  expandedProviderNoteId.value = note.id;
 }
 
 function delegateActions() {
@@ -3184,6 +4376,9 @@ function sendResidentChat() {
 }
 
 function openThread(thread: Thread) {
+  if (thread.unread > 0) {
+    createLocalThread({ ...thread, unread: 0 });
+  }
   selectedThreadId.value = thread.id;
   threadMessages.value = [...thread.messages];
   threadMenuOpen.value = false;
@@ -3324,6 +4519,12 @@ function currentTimeLabel() {
   });
 }
 
+function currentNoteDateTimeLabel() {
+  const now = new Date();
+  const date = now.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${date}, ${currentTimeLabel()}`;
+}
+
 function displayFirstName(name: string) {
   return name.replace(/^Dr\.\s*/i, "").split(" ")[0].replace(/,$/, "");
 }
@@ -3356,18 +4557,15 @@ function createProviderNote(source: ProviderNoteSource, body: string) {
     id: `pn-${Date.now()}`,
     residentId: selectedResident.value.id,
     residentName: selectedResident.value.name,
-    title:
-      text.length > 58
-        ? `${text.slice(0, 58).trim()}...`
-        : text,
+    title: `${source === "voice" ? "Voice Note" : "Note"} - ${currentNoteDateTimeLabel()}`,
     body: text,
     source,
     createdAt: currentTimeLabel(),
     status: "note",
   };
 
-  providerNotesState.value = [note, ...providerNotesState.value];
-  selectedProviderNoteId.value = note.id;
+  providerNotesState.value = [...providerNotesState.value, note];
+  expandedProviderNoteId.value = note.id;
   providerNoteDraft.value = "";
 }
 
@@ -3402,43 +4600,91 @@ function stopProviderRecording() {
   createProviderNote("voice", transcript);
 }
 
-function createEncounterDraft(note: ProviderNote) {
-  if (!note.encounterDraft) {
-    note.encounterDraft = {
-      id: `enc-${Date.now()}`,
-      residentId: note.residentId,
-      visitType: note.title.toLowerCase().includes("uti") ? "Acute" : "Follow-Up",
-      body: note.body,
-      instructions: "Review note, confirm orders or follow-up instructions, then send to Otangeles Notes+.",
-      destination: "Otangeles Notes+",
-      status: "draft",
-    };
+function toggleProviderNote(noteId: string) {
+  expandedProviderNoteId.value = expandedProviderNoteId.value === noteId ? null : noteId;
+}
+
+function noteSummaryForEncounter(body: string) {
+  const text = body.trim().replace(/\s+/g, " ");
+  if (text.length <= 180) {
+    return text;
   }
+
+  const sentenceMatches = text.match(/[^.!?]+[.!?]+/g);
+  const summary = sentenceMatches?.slice(0, 2).join(" ").trim() || text.slice(0, 240).trim();
+  return summary.length > 260 ? `${summary.slice(0, 257).trim()}...` : summary;
+}
+
+function defaultVisitTypeForProviderNote(note: ProviderNote): VisitType {
+  const lower = `${note.title} ${note.body}`.toLowerCase();
+  if (/(acute|uti|delirium|fall|pain|fever|change)/.test(lower)) {
+    return "Acute";
+  }
+  return "Follow-Up";
+}
+
+function openEncounterModal(note: ProviderNote) {
+  encounterModalNoteId.value = note.id;
+  expandedProviderNoteId.value = note.id;
+  encounterModalDraft.value = {
+    residentName: note.residentName,
+    visitType: note.encounterDraft?.visitType ?? defaultVisitTypeForProviderNote(note),
+    notes: note.encounterDraft?.body ?? noteSummaryForEncounter(note.body),
+  };
+}
+
+function closeEncounterModal() {
+  encounterModalNoteId.value = null;
+}
+
+function submitEncounterModal() {
+  const note = encounterModalNote.value;
+  if (!note) {
+    return;
+  }
+
+  const notes = encounterModalDraft.value.notes.trim();
+  if (!encounterModalDraft.value.residentName.trim() || !notes) {
+    return;
+  }
+
+  note.residentName = encounterModalDraft.value.residentName.trim();
+  note.encounterDraft = {
+    id: note.encounterDraft?.id ?? `enc-${Date.now()}`,
+    residentId: note.residentId,
+    visitType: encounterModalDraft.value.visitType,
+    body: notes,
+    instructions: "Review note, confirm orders or follow-up instructions, then send to Otangeles Notes+.",
+    destination: "Otangeles Notes+",
+    status: "draft",
+  };
   note.status = "draft-created";
-  selectedProviderNoteId.value = note.id;
-  noteActionMenuOpen.value = null;
+  expandedProviderNoteId.value = note.id;
+  closeEncounterModal();
 }
 
-function markEncounterReady(note: ProviderNote) {
-  if (!note.encounterDraft) {
-    createEncounterDraft(note);
-  }
-  if (note.encounterDraft) {
-    note.encounterDraft.status = "ready";
-  }
-  note.status = "ready-for-ehr";
+function openDeleteProviderNoteModal(note: ProviderNote) {
+  deleteProviderNoteId.value = note.id;
+  expandedProviderNoteId.value = note.id;
 }
 
-function toggleNoteActions(noteId: string) {
-  noteActionMenuOpen.value = noteActionMenuOpen.value === noteId ? null : noteId;
+function closeDeleteProviderNoteModal() {
+  deleteProviderNoteId.value = null;
 }
 
 function deleteProviderNote(noteId: string) {
   providerNotesState.value = providerNotesState.value.filter((note) => note.id !== noteId);
-  if (selectedProviderNoteId.value === noteId) {
-    selectedProviderNoteId.value = selectedResidentNotes.value[0]?.id ?? null;
+  if (expandedProviderNoteId.value === noteId) {
+    expandedProviderNoteId.value = null;
   }
-  noteActionMenuOpen.value = null;
+}
+
+function confirmDeleteProviderNote() {
+  if (!deleteProviderNoteId.value) {
+    return;
+  }
+  deleteProviderNote(deleteProviderNoteId.value);
+  closeDeleteProviderNoteModal();
 }
 
 function providerNoteSourceLabel(source: ProviderNoteSource) {
@@ -3541,9 +4787,12 @@ function statusTone(label: string) {
     normalized.includes("new") ||
     normalized.includes("active") ||
     normalized.includes("urgent") ||
+    normalized.includes("escalation") ||
     normalized.includes("escalated") ||
+    normalized.includes("hospital") ||
     normalized.includes("correction") ||
     normalized.includes("flagged") ||
+    normalized.includes("cancelled") ||
     normalized.includes("stat")
   ) {
     return "danger";
@@ -3558,6 +4807,7 @@ function statusTone(label: string) {
     normalized.includes("signing") ||
     normalized.includes("recording") ||
     normalized.includes("draft") ||
+    normalized.includes("progress") ||
     normalized.includes("follow-up") ||
     normalized.includes("order")
   ) {
@@ -3576,6 +4826,10 @@ function statusTone(label: string) {
     return "success";
   }
   return "neutral";
+}
+
+function scheduleItemTone(item: ResidentScheduleItem) {
+  return item.kind === "escalation" ? "danger" : statusTone(item.tone);
 }
 
 function concernTone(color: Resident["situation"]["concerns"][number]["color"]) {
@@ -3659,7 +4913,6 @@ function confirmSignOut() {
   taggedMessageContext.value = null;
   actionModalSource.value = null;
   escalationModalResidentId.value = null;
-  huddleModalResidentId.value = null;
   scheduleModalOpen.value = false;
   editingClinicalOrderId.value = null;
   selectedScheduleDateKey.value = null;
@@ -3721,35 +4974,21 @@ function isSageNav(view: ViewName) {
 
         <label class="login-field">
           <span>Workspace role</span>
-          <select
-            :value="selectedRole"
+          <AppSelect
+            :model-value="selectedRole"
+            :options="roleSelectOptions"
             aria-label="Select workspace role"
-            @change="handleLoginRoleChange"
-          >
-            <option
-              v-for="role in roleProfiles"
-              :key="role.key"
-              :value="role.key"
-            >
-              {{ role.label }}
-            </option>
-          </select>
+            @update:model-value="selectRole($event as RoleKey)"
+          />
         </label>
 
         <label class="login-field">
           <span>Staff identity</span>
-          <select
+          <AppSelect
             v-model="selectedLoginUserIdModel"
+            :options="loginStaffSelectOptions"
             aria-label="Select staff identity"
-          >
-            <option
-              v-for="user in loginStaffOptions"
-              :key="user.id"
-              :value="user.id"
-            >
-              {{ user.name }} · {{ user.role }}
-            </option>
-          </select>
+          />
         </label>
 
         <div class="login-user">
@@ -3794,8 +5033,11 @@ function isSageNav(view: ViewName) {
         type="button"
         @click="setView(item.key)"
       >
-        <component :is="item.icon" :size="18" />
-        <span>{{ item.label }}</span>
+        <span class="nav-icon-wrap">
+          <component :is="item.icon" :size="18" />
+        </span>
+        <span class="nav-label">{{ item.label }}</span>
+        <span v-if="navBadgeCount(item.key)" class="nav-badge nav-badge-inline">{{ navBadgeCount(item.key) }}</span>
       </button>
 
       <div class="desktop-summary">
@@ -3810,18 +5052,16 @@ function isSageNav(view: ViewName) {
 
     <main class="main-surface">
       <div class="facility-bar content-frame">
-        <label class="facility-select">
+        <div class="facility-select">
           <Globe :size="16" />
-          <select v-model="selectedFacilityModel" aria-label="Switch facility">
-            <option
-              v-for="facility in facilityOptions"
-              :key="facility"
-              :value="facility"
-            >
-              {{ facilityOptionLabel(facility) }}
-            </option>
-          </select>
-        </label>
+          <AppSelect
+            :model-value="selectedFacility"
+            :options="facilitySelectOptions"
+            aria-label="Switch facility"
+            @click="profileMenuOpen = false"
+            @update:model-value="setSelectedFacility"
+          />
+        </div>
 
         <div class="profile-menu-wrap">
           <button
@@ -3927,23 +5167,116 @@ function isSageNav(view: ViewName) {
         </div>
 
         <div v-if="residentTab === 'situation'" class="detail-grid content-frame">
-          <article class="panel care-panel">
-            <div class="section-label">Care Status</div>
-            <div class="stepper">
-              <template v-for="(step, index) in careStepItems(workingCareSteps)" :key="step.label">
-                <div class="step">
-                  <span class="step-dot" :class="step.state">
-                    <Check v-if="step.state === 'done'" :size="15" />
-                    <span v-else-if="step.state === 'active'" class="active-dot" />
-                    <span v-else>{{ index + 1 }}</span>
-                  </span>
-                  <span>{{ step.label }}</span>
-                </div>
+          <article class="panel patient-focus-panel">
+            <div class="notes-panel-header">
+              <div>
+                <div class="section-label">Patient Focus</div>
+                <h2>{{ selectedResidentOpportunity?.category ?? selectedResident.latest }}</h2>
+              </div>
+              <div class="patient-focus-header-chips">
+                <span class="chip compact" :class="statusTone(selectedResidentOpportunity?.urgency ?? selectedResident.acuity)">
+                  <template v-if="selectedResidentOpportunity">{{ selectedResidentOpportunity.confidence }}% confidence</template>
+                  <template v-else>{{ selectedResident.acuity }}</template>
+                </span>
                 <span
-                  v-if="index < careStepItems(workingCareSteps).length - 1"
-                  class="step-line"
-                />
-              </template>
+                  v-if="selectedResidentOpportunity"
+                  class="chip compact"
+                  :class="statusTone(opportunityActionStatusLabel(selectedResidentOpportunity))"
+                >
+                  {{ opportunityActionStatusLabel(selectedResidentOpportunity) }}
+                </span>
+              </div>
+            </div>
+
+            <p class="patient-focus-read">
+              {{ selectedResidentOpportunity?.reason ?? selectedResident.situation.summary }}
+            </p>
+
+            <div class="patient-focus-context">
+              <section>
+                <small>Summary</small>
+                <p>{{ selectedResident.situation.summary }}</p>
+              </section>
+              <section>
+                <small>Memory</small>
+                <p>{{ selectedResident.situation.memory }}</p>
+              </section>
+              <section class="patient-focus-deviation">
+                <small>Predicted deviation</small>
+                <div v-if="selectedResidentOpportunity" class="patient-focus-deviation-list">
+                  <span v-for="change in selectedResidentOpportunity.changes" :key="change">
+                    {{ change }}
+                  </span>
+                </div>
+                <p v-else>{{ selectedResident.latest }}</p>
+              </section>
+            </div>
+
+            <div v-if="selectedResidentOpportunity" class="patient-focus-next">
+              <strong>Recommended next:</strong>
+              <span>{{ selectedResidentOpportunity.recommendedAction }}</span>
+            </div>
+
+            <div class="card-actions patient-focus-action-strip">
+              <button
+                v-if="selectedResidentOpportunity"
+                class="soft-action compact-action"
+                type="button"
+                @click="toggleSection(residentSectionKey('prediction-evidence'))"
+              >
+                <Eye :size="15" />
+                {{ isSectionExpanded(residentSectionKey('prediction-evidence')) ? "Hide evidence" : "Show evidence" }}
+              </button>
+              <button
+                v-if="selectedResidentOpportunity && !actionForOpportunity(selectedResidentOpportunity)"
+                class="primary-action compact-action"
+                type="button"
+                @click="openActionRequestFromOpportunity(selectedResidentOpportunity, 'Resident Prediction')"
+              >
+                <Send :size="15" />
+                Assign immediate action
+              </button>
+              <button
+                v-else-if="selectedResidentOpportunity"
+                class="soft-action compact-action"
+                type="button"
+                @click="reviewOpportunityAction(selectedResidentOpportunity)"
+              >
+                <FileText :size="15" />
+                Review action
+              </button>
+              <button
+                v-else
+                class="primary-action compact-action"
+                type="button"
+                @click="openOrderAction(selectedResident)"
+              >
+                <FileText :size="15" />
+                {{ selectedRole === "provider" ? "New Order" : "Request Review" }}
+              </button>
+            </div>
+
+            <div
+              v-if="selectedResidentOpportunity && isSectionExpanded(residentSectionKey('prediction-evidence'))"
+              class="prediction-evidence"
+            >
+              <div class="delegate-summary">
+                <span><strong>Sources:</strong> {{ opportunitySourceSummary(selectedResidentOpportunity) }}</span>
+              </div>
+              <div class="evidence-group-list">
+                <div
+                  v-for="group in opportunityEvidenceGroups(selectedResidentOpportunity)"
+                  :key="group.source"
+                  class="evidence-group"
+                >
+                  <strong>{{ group.source }}:</strong>
+                  <ul>
+                    <li v-for="event in group.events" :key="event.id">
+                      {{ opportunityEvidenceItemText(event) }}
+                    </li>
+                  </ul>
+                </div>
+              </div>
             </div>
 
             <div v-if="assignedNurse" class="assignment-note">
@@ -3955,28 +5288,83 @@ function isSageNav(view: ViewName) {
             </div>
           </article>
 
-          <article class="panel summary-panel">
-            <div class="section-label">Summary</div>
-            <p class="body-copy">{{ selectedResident.situation.summary }}</p>
-            <div class="note-band">
-              <Info :size="16" />
-              <div>
-                <strong>Memory</strong>
-                <p>{{ selectedResident.situation.memory }}</p>
-              </div>
+          <article class="panel resident-context-tabs-panel">
+            <div class="resident-context-tabs" role="tablist" aria-label="Resident context">
+              <button
+                type="button"
+                :class="{ active: residentContextTab === 'updates' }"
+                @click="residentContextTab = 'updates'"
+              >
+                Care Updates
+                <span>{{ selectedResidentCareUpdates.length }}</span>
+              </button>
+              <button
+                type="button"
+                :class="{ active: residentContextTab === 'actions' }"
+                @click="residentContextTab = 'actions'"
+              >
+                Shared Actions
+                <span>{{ selectedResidentOpenActionCount }}</span>
+              </button>
+              <button
+                type="button"
+                :class="{ active: residentContextTab === 'orders' }"
+                @click="residentContextTab = 'orders'"
+              >
+                Orders & Follow-ups
+                <span>{{ selectedResidentScheduleItems.length }}</span>
+              </button>
             </div>
           </article>
 
-          <article v-if="selectedResidentActions.length" class="panel action-panel">
+          <article v-if="residentContextTab === 'updates'" class="panel care-updates-panel resident-context-panel">
+            <div class="notes-panel-header">
+              <div>
+                <div class="section-label">Care Updates</div>
+                <h2>Shared resident context</h2>
+              </div>
+              <span class="chip compact">{{ selectedResidentCareUpdates.length }} updates</span>
+            </div>
+            <div v-if="selectedResidentCareUpdates.length" class="care-update-list">
+              <article
+                v-for="update in selectedResidentCareUpdates"
+                :key="update.id"
+                class="care-update-row"
+                :class="update.tone"
+              >
+                <span class="care-update-icon" :class="update.tone">
+                  <Mic v-if="update.kind === 'debrief'" :size="16" />
+                  <FileText v-else-if="update.kind === 'provider-note' || update.kind === 'order'" :size="16" />
+                  <AlertTriangle v-else-if="update.kind === 'escalation'" :size="16" />
+                  <Users v-else-if="update.kind === 'huddle'" :size="16" />
+                  <Clock v-else-if="update.kind === 'follow-up'" :size="16" />
+                  <CheckCircle v-else :size="16" />
+                </span>
+                <span>
+                  <small>{{ update.label }} · {{ update.meta }}</small>
+                  <strong>{{ update.title }}</strong>
+                  <p>{{ update.body }}</p>
+                </span>
+                <span class="chip compact" :class="statusTone(update.status)">
+                  {{ update.status }}
+                </span>
+              </article>
+            </div>
+            <p v-else class="empty-copy">
+              No shared care updates yet for this resident.
+            </p>
+          </article>
+
+          <article v-if="residentContextTab === 'actions'" class="panel action-panel resident-actions-panel resident-context-panel">
             <div class="notes-panel-header">
               <div>
                 <div class="section-label">Shared Actions</div>
                 <h2>Role follow-up</h2>
               </div>
-              <span class="chip compact">{{ selectedResidentActions.length }} active</span>
+              <span class="chip compact">{{ selectedResidentOpenActionCount }} active</span>
             </div>
-            <div class="action-list">
-              <div v-for="action in selectedResidentActions" :key="action.id" class="action-row">
+            <div v-if="selectedResidentActions.length" class="action-list">
+              <div v-for="action in selectedResidentActions.slice(0, 4)" :key="action.id" class="action-row">
                 <span>
                   <strong>{{ action.actionType }}</strong>
                   <small>{{ actionAssigneeName(action) }} · {{ action.dueTime }} · {{ action.instructions }}</small>
@@ -3988,29 +5376,35 @@ function isSageNav(view: ViewName) {
                   v-if="(selectedRole === 'provider' && action.assignedRole === 'provider') || (selectedRole === 'cna' && action.assignedRole === 'cna')"
                   class="action-row-controls"
                 >
-                  <button class="soft-action compact-action" type="button" @click="updateActionStatus(action, 'completed')">
+                  <button class="soft-action compact-action" type="button" @click="handleActionStatusSelection(action, 'completed')">
                     <Check :size="14" />
-                    Done
+                    {{ actionCompleteLabel(action) }}
                   </button>
-                  <button class="soft-action compact-action" type="button" @click="updateActionStatus(action, 'flagged')">
+                  <button class="soft-action compact-action" type="button" @click="handleActionStatusSelection(action, 'flagged')">
                     <AlertTriangle :size="14" />
-                    Flag
+                    {{ actionFlagLabel(action) }}
                   </button>
                 </div>
               </div>
             </div>
+            <p v-else class="empty-copy">
+              No shared actions assigned for this resident yet.
+            </p>
           </article>
 
-          <article class="panel action-panel orders-followups-panel">
+          <article v-if="residentContextTab === 'orders'" class="panel action-panel orders-followups-panel resident-context-panel">
             <div class="notes-panel-header">
               <div>
                 <div class="section-label">Orders & Follow-ups</div>
                 <h2>Scheduled clinical work</h2>
               </div>
-              <button class="soft-action compact-action" type="button" @click="openOrderAction(selectedResident)">
-                <FileText :size="14" />
-                {{ selectedRole === "provider" ? "New Order" : "Request Review" }}
-              </button>
+              <div class="section-header-actions">
+                <button class="soft-action compact-action" type="button" @click="openOrderAction(selectedResident)">
+                  <FileText :size="14" />
+                  {{ selectedRole === "provider" ? "New Order" : "Request Review" }}
+                </button>
+                <span class="chip compact">{{ selectedResidentScheduleItems.length }} items</span>
+              </div>
             </div>
             <div v-if="selectedResidentScheduleItems.length" class="schedule-list compact-schedule-list">
               <div
@@ -4030,74 +5424,73 @@ function isSageNav(view: ViewName) {
                     <strong>{{ item.title }}</strong>
                     <small>{{ item.time }} · {{ item.detail }}</small>
                   </span>
-                  <span class="chip compact" :class="statusTone(item.tone)">
-                    {{ item.kind }}
+                  <span class="chip compact" :class="scheduleItemTone(item)">
+                    {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
                   </span>
                 </button>
                 <button
-                  v-if="item.threadId"
-                  class="soft-icon"
+                  v-if="item.threadId && item.kind !== 'order'"
+                  class="soft-icon schedule-message-action"
                   type="button"
                   aria-label="Open linked thread"
                   @click="openScheduleThread(item.threadId)"
                 >
                   <MessageCircle :size="15" />
+                  <span>Message</span>
                 </button>
+                <div v-if="item.kind === 'order'" class="schedule-order-actions">
+                  <button
+                    v-if="selectedRole === 'provider'"
+                    class="soft-action compact-action"
+                    type="button"
+                    @click="openClinicalOrderFromScheduleItem(item)"
+                  >
+                    <FileText :size="14" />
+                    Edit
+                  </button>
+                  <button
+                    v-if="item.threadId"
+                    class="soft-action compact-action"
+                    type="button"
+                    @click="openScheduleThread(item.threadId)"
+                  >
+                    <MessageCircle :size="14" />
+                    Message
+                  </button>
+                  <button
+                    class="soft-action compact-action"
+                    type="button"
+                    :disabled="orderStatusForScheduleItem(item) === 'completed'"
+                    @click="updateClinicalOrderFromScheduleItem(item, 'completed')"
+                  >
+                    <Check :size="14" />
+                    Complete
+                  </button>
+                  <button
+                    class="soft-action compact-action"
+                    type="button"
+                    :disabled="orderStatusForScheduleItem(item) === 'flagged'"
+                    @click="updateClinicalOrderFromScheduleItem(item, 'flagged')"
+                  >
+                    <AlertTriangle :size="14" />
+                    Flag
+                  </button>
+                </div>
               </div>
             </div>
             <p v-else class="empty-copy">
               No orders, huddles, or follow-ups scheduled for this resident yet.
             </p>
-            <div v-if="selectedRole === 'provider' && selectedResidentClinicalOrders.length" class="order-draft-list">
-              <div v-for="order in selectedResidentClinicalOrders" :key="order.id" class="order-draft-row">
-                <span>
-                  <strong>{{ order.orderType }} · {{ order.status }}</strong>
-                  <small>{{ formatDateTimeLabel(order.requestedDate, order.requestedTime) }} · {{ order.indication }}</small>
-                </span>
-                <div class="action-row-controls">
-                  <button class="soft-action compact-action" type="button" @click="openClinicalOrderDraft(order)">
-                    Edit
-                  </button>
-                  <button
-                    class="soft-action compact-action"
-                    type="button"
-                    :disabled="order.status === 'ready' || order.status === 'sent'"
-                    @click="updateClinicalOrderStatus(order, 'ready')"
-                  >
-                    Mark Ready
-                  </button>
-                  <button
-                    class="primary-action compact-action"
-                    type="button"
-                    :disabled="order.status === 'sent'"
-                    @click="updateClinicalOrderStatus(order, 'sent')"
-                  >
-                    Send
-                  </button>
-                </div>
-              </div>
-            </div>
-          </article>
-
-          <article v-if="selectedResident.situation.concerns.length" class="panel">
-            <div class="section-label">Unresolved Concerns</div>
-            <div class="stack">
-              <div
-                v-for="concern in selectedResident.situation.concerns"
-                :key="concern.title"
-                class="concern-row"
-              >
-                <span class="dot" :class="concernTone(concern.color)" />
-                <span>{{ concern.title }}</span>
-                <span class="chip compact" :class="statusTone(concern.status)">
-                  {{ concern.status }}
-                </span>
-              </div>
-            </div>
           </article>
 
           <article v-if="selectedResident.situation.vitals.length" class="panel vitals-panel">
-            <div class="section-label">Vitals · Trajectory vs Baseline</div>
+            <div class="notes-panel-header">
+              <div>
+                <div class="section-label">Vitals</div>
+                <h2>Trajectory vs baseline</h2>
+              </div>
+              <span class="chip compact">{{ selectedResident.situation.vitals.length }} vitals</span>
+            </div>
             <div class="vital-list">
               <div
                 v-for="vital in selectedResident.situation.vitals"
@@ -4166,7 +5559,7 @@ function isSageNav(view: ViewName) {
         </div>
 
         <div v-else-if="residentTab === 'notes'" class="resident-notes-screen content-frame">
-          <div class="notes-layout">
+          <div class="notes-layout provider-notes-layout">
             <section class="panel notes-list-panel">
               <div class="notes-panel-header">
                 <div>
@@ -4211,14 +5604,19 @@ function isSageNav(view: ViewName) {
                 </div>
               </div>
 
-              <div class="note-card-list">
+              <div class="note-card-list provider-note-accordion-list">
                 <article
                   v-for="note in selectedResidentNotes"
                   :key="note.id"
-                  class="note-card"
-                  :class="{ selected: selectedProviderNote?.id === note.id }"
+                  class="note-card provider-note-accordion"
+                  :class="{ selected: expandedProviderNoteId === note.id }"
                 >
-                  <button class="note-card-main" type="button" @click="selectedProviderNoteId = note.id">
+                  <button
+                    class="note-card-main provider-note-accordion-header"
+                    type="button"
+                    :aria-expanded="expandedProviderNoteId === note.id"
+                    @click="toggleProviderNote(note.id)"
+                  >
                     <span>
                       <strong>{{ note.title }}</strong>
                       <small>{{ providerNoteSourceLabel(note.source) }} · {{ note.createdAt }}</small>
@@ -4230,88 +5628,33 @@ function isSageNav(view: ViewName) {
                     <span class="chip compact" :class="statusTone(note.status)">
                       {{ note.status.replaceAll("-", " ") }}
                     </span>
+                    <ChevronUp v-if="expandedProviderNoteId === note.id" :size="16" />
+                    <ChevronDown v-else :size="16" />
                   </button>
-                  <button
-                    class="note-menu-button"
-                    type="button"
-                    :aria-label="`Open actions for ${note.title}`"
-                    @click.stop="toggleNoteActions(note.id)"
-                  >
-                    <ChevronDown :size="16" />
-                  </button>
-                  <div v-if="noteActionMenuOpen === note.id" class="note-actions-menu">
-                    <button type="button" @click="createEncounterDraft(note)">
-                      <FileText :size="15" />
-                      {{ note.encounterDraft ? "Open encounter draft" : "Convert to encounter" }}
-                    </button>
-                    <button type="button" class="danger-text" @click="deleteProviderNote(note.id)">
-                      <X :size="15" />
-                      Delete note
-                    </button>
+                  <div v-if="expandedProviderNoteId === note.id" class="provider-note-accordion-body">
+                    <div class="section-label">
+                      {{ note.source === "voice" ? "Transcription" : "Note Body" }}
+                    </div>
+                    <p class="body-copy">{{ note.body }}</p>
+                    <div v-if="note.encounterDraft" class="delegate-summary">
+                      <span><strong>Encounter:</strong> {{ note.encounterDraft.visitType }} draft for Otangeles Notes+</span>
+                      <span><strong>Notes:</strong> {{ note.encounterDraft.body }}</span>
+                    </div>
+                    <div class="provider-note-actions">
+                      <button class="primary-action compact-action" type="button" @click="openEncounterModal(note)">
+                        <FileText :size="15" />
+                        Create an Encounter
+                      </button>
+                      <button class="danger-action compact-action" type="button" @click="openDeleteProviderNoteModal(note)">
+                        <X :size="15" />
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </article>
                 <p v-if="selectedResidentNotes.length === 0" class="empty-copy">
                   No provider notes yet for this resident.
                 </p>
-              </div>
-            </section>
-
-            <section v-if="selectedProviderNote" class="panel note-detail-panel">
-              <div class="notes-panel-header">
-                <div>
-                  <div class="section-label">Note Detail</div>
-                  <h2>{{ selectedProviderNote.title }}</h2>
-                  <p>{{ providerNoteSourceLabel(selectedProviderNote.source) }} · {{ selectedProviderNote.createdAt }}</p>
-                </div>
-                <span class="chip compact" :class="statusTone(selectedProviderNote.status)">
-                  {{ selectedProviderNote.status.replaceAll("-", " ") }}
-                </span>
-              </div>
-              <p class="body-copy">{{ selectedProviderNote.body }}</p>
-
-              <button
-                v-if="!selectedProviderNote.encounterDraft"
-                class="primary-action"
-                type="button"
-                @click="createEncounterDraft(selectedProviderNote)"
-              >
-                <FileText :size="16" />
-                Create Encounter Draft
-              </button>
-
-              <div v-if="selectedProviderNote.encounterDraft" class="encounter-draft">
-                <div class="section-label">Otangeles Notes+ Visit Draft</div>
-                <label>
-                  Resident
-                  <input v-model="selectedProviderNote.residentName" type="text" />
-                </label>
-                <label>
-                  Visit Type
-                  <select v-model="selectedProviderNote.encounterDraft.visitType">
-                    <option v-for="visitType in visitTypes" :key="visitType" :value="visitType">
-                      {{ visitType }}
-                    </option>
-                  </select>
-                </label>
-                <label>
-                  Note Body
-                  <textarea v-model="selectedProviderNote.encounterDraft.body" rows="5" />
-                </label>
-                <label>
-                  Instructions
-                  <textarea v-model="selectedProviderNote.encounterDraft.instructions" rows="3" />
-                </label>
-                <div class="encounter-actions">
-                  <span>{{ selectedProviderNote.encounterDraft.destination }}</span>
-                  <button
-                    class="primary-action compact-action"
-                    type="button"
-                    @click="markEncounterReady(selectedProviderNote)"
-                  >
-                    <Check :size="15" />
-                    Mark Ready
-                  </button>
-                </div>
               </div>
             </section>
           </div>
@@ -4334,9 +5677,15 @@ function isSageNav(view: ViewName) {
         </div>
 
         <div v-else class="timeline-list content-frame">
-          <div class="section-label">Last 24 Hours</div>
+          <div class="timeline-list-header">
+            <div>
+              <div class="section-label">Timeline</div>
+              <h2>What happened for {{ selectedResident.name }}</h2>
+            </div>
+            <span class="chip compact">{{ selectedResidentTimelineEvents.length }} events</span>
+          </div>
           <article
-            v-for="event in selectedResident.timeline"
+            v-for="event in selectedResidentTimelineEvents"
             :key="event.id"
             class="timeline-item"
           >
@@ -4345,7 +5694,13 @@ function isSageNav(view: ViewName) {
             </span>
             <div>
               <div class="eyebrow">{{ event.timeAgo }} · {{ event.period }}</div>
-              <div class="panel timeline-card">
+              <div class="panel timeline-card" :class="event.tone">
+                <div class="timeline-card-head">
+                  <strong>{{ event.title }}</strong>
+                  <span v-if="event.status" class="chip compact" :class="statusTone(event.status)">
+                    {{ event.status }}
+                  </span>
+                </div>
                 <p>{{ event.text }}</p>
                 <div v-if="event.interpretation" class="sage-note">
                   <strong>Sage:</strong>
@@ -4369,30 +5724,245 @@ function isSageNav(view: ViewName) {
           </div>
         </header>
 
-        <div v-if="openActionRequests.length" class="action-command-strip content-frame">
-          <article class="panel action-panel">
-            <div class="notes-panel-header">
-              <div>
-                <div class="section-label">Immediate Actions</div>
-                <h2>DON coordination queue</h2>
-              </div>
-              <span class="chip compact warning">{{ openActionRequests.length }} open</span>
+        <section class="situation-accordion-list content-frame">
+          <article class="situation-accordion panel" :class="{ open: openSituationAccordion === 'facility-focus' }">
+            <button
+              class="situation-accordion-header"
+              type="button"
+              :aria-expanded="openSituationAccordion === 'facility-focus'"
+              @click="setSituationAccordion('facility-focus')"
+            >
+              <span>
+                <strong>Facility Focus</strong>
+                <small>{{ donFocusItems.length }} focus items ranked by urgency</small>
+              </span>
+              <span class="accordion-header-side">
+                <span class="chip compact warning">{{ donFocusItems.length }} items</span>
+                <ChevronUp v-if="openSituationAccordion === 'facility-focus'" :size="17" />
+                <ChevronDown v-else :size="17" />
+              </span>
+            </button>
+            <div v-if="openSituationAccordion === 'facility-focus' && donFocusItems.length" class="focus-list situation-accordion-body">
+              <article v-for="item in donFocusItems" :key="item.id" class="focus-row don-focus-row" :class="item.tone">
+                <span class="focus-icon" :class="item.tone">
+                  <Zap v-if="item.kind === 'prediction'" :size="16" />
+                  <AlertTriangle v-else-if="item.kind === 'escalation' || item.status.toLowerCase().includes('flagged')" :size="16" />
+                  <FileText v-else :size="16" />
+                </span>
+                <span class="focus-copy">
+                  <small>{{ item.meta }}</small>
+                  <strong>{{ item.title }}</strong>
+                  <p>{{ item.body }}</p>
+                  <span class="focus-status-row">
+                    <span class="chip compact" :class="statusTone(item.status)">
+                      {{ item.status }}
+                    </span>
+                  </span>
+                </span>
+                <div class="focus-actions">
+                  <button class="primary-action compact-action" type="button" @click="handleFocusItemAction(item)">
+                    {{ item.primaryLabel }}
+                    <ArrowRight :size="14" />
+                  </button>
+                  <button
+                    v-if="item.secondaryAction"
+                    class="soft-action compact-action"
+                    type="button"
+                    @click="handleFocusItemAction(item, item.secondaryAction)"
+                  >
+                    {{ item.secondaryLabel }}
+                  </button>
+                </div>
+              </article>
             </div>
-            <div class="action-list compact">
-              <div v-for="action in openActionRequests.slice(0, 4)" :key="action.id" class="action-row">
-                <span>
+            <p v-else-if="openSituationAccordion === 'facility-focus'" class="empty-copy situation-accordion-body">
+              No urgent facility focus items for the selected facility.
+            </p>
+          </article>
+
+          <article class="situation-accordion panel" :class="{ open: openSituationAccordion === 'requested-actions' }">
+          <button
+            class="situation-accordion-header"
+            type="button"
+            :aria-expanded="openSituationAccordion === 'requested-actions'"
+            @click="setSituationAccordion('requested-actions')"
+          >
+            <span>
+              <strong>Requested Actions</strong>
+              <small>{{ openActionRequests.length }} open team follow-ups</small>
+            </span>
+            <span class="accordion-header-side">
+              <span class="chip compact warning">{{ openActionRequests.length }} open</span>
+              <ChevronUp v-if="openSituationAccordion === 'requested-actions'" :size="17" />
+              <ChevronDown v-else :size="17" />
+            </span>
+          </button>
+            <div v-if="openSituationAccordion === 'requested-actions' && openActionRequests.length" class="action-list command-action-list situation-accordion-body">
+              <div
+                v-for="action in openActionRequests.slice(0, 4)"
+                :key="action.id"
+                class="action-row readable-action-row"
+              >
+                <span class="action-row-copy">
                   <strong>{{ action.residentName }} · {{ action.actionType }}</strong>
                   <small>{{ actionAssigneeName(action) }} · {{ action.priority }} · {{ action.dueTime }}</small>
+                  <small>{{ action.instructions }}</small>
                 </span>
                 <span class="chip compact" :class="statusTone(action.status)">
                   {{ action.status.replace("-", " ") }}
                 </span>
+                <div class="action-row-controls">
+                  <button class="soft-action compact-action" type="button" @click="reviewActionResident(action)">
+                    <FileText :size="14" />
+                    Review Chart
+                  </button>
+                  <button class="soft-action compact-action" type="button" @click="assignImmediateActionFromRequest(action)">
+                    <Send :size="14" />
+                    Assign immediate action
+                  </button>
+                </div>
               </div>
             </div>
+            <p v-else-if="openSituationAccordion === 'requested-actions'" class="empty-copy situation-accordion-body">
+              No open requested actions for this facility.
+            </p>
           </article>
-        </div>
 
-        <div class="situation-layout">
+          <article class="situation-accordion panel" :class="{ open: openSituationAccordion === 'facility-intelligence' }">
+          <button
+            class="situation-accordion-header"
+            type="button"
+            :aria-expanded="openSituationAccordion === 'facility-intelligence'"
+            @click="setSituationAccordion('facility-intelligence')"
+          >
+            <span>
+              <strong>Facility Intelligence</strong>
+              <small>{{ filteredProviderOpportunities.length }} generated predictions across {{ filteredFacilityIntelligenceSummaries.length }} facilities</small>
+            </span>
+            <span class="accordion-header-side">
+              <span class="chip compact warning">{{ filteredProviderOpportunities.length }} predictions</span>
+              <ChevronUp v-if="openSituationAccordion === 'facility-intelligence'" :size="17" />
+              <ChevronDown v-else :size="17" />
+            </span>
+          </button>
+
+            <div v-if="openSituationAccordion === 'facility-intelligence' && filteredFacilityIntelligenceSummaries.length" class="action-list command-action-list situation-accordion-body">
+              <div
+                v-for="summary in filteredFacilityIntelligenceSummaries"
+                :key="summary.facility"
+                class="action-row readable-action-row"
+              >
+                <div class="facility-intelligence-copy">
+                  <div class="facility-intelligence-head">
+                    <strong>{{ summary.facility }}</strong>
+                    <span class="facility-intelligence-status-group">
+                      <span class="chip compact" :class="summary.urgent ? 'danger' : summary.high ? 'warning' : 'success'">
+                        {{ summary.urgent ? "urgent" : summary.high ? "watch" : "routine" }}
+                      </span>
+                      <span class="chip compact facility-intelligence-status-chip" :class="statusTone(facilityReadinessLabel(summary))">
+                        {{ facilityReadinessLabel(summary) }}
+                      </span>
+                      <span
+                        v-if="summary.topOpportunity"
+                        class="chip compact facility-intelligence-status-chip"
+                        :class="statusTone(opportunityActionStatusLabel(summary.topOpportunity))"
+                      >
+                        {{ opportunityActionStatusLabel(summary.topOpportunity) }}
+                      </span>
+                    </span>
+                  </div>
+                  <div class="facility-intelligence-metrics">
+                    <span>
+                      <strong>{{ summary.total }}</strong>
+                      predictions
+                    </span>
+                    <span>
+                      <strong>{{ summary.urgent }}</strong>
+                      urgent
+                    </span>
+                    <span>
+                      <strong>{{ summary.high }}</strong>
+                      high
+                    </span>
+                    <span>
+                      <strong>{{ summary.openActions }}</strong>
+                      open actions
+                    </span>
+                  </div>
+                  <div v-if="summary.topOpportunity" class="facility-intelligence-top-resident">
+                    <small>Top resident</small>
+                    <strong>{{ summary.topOpportunity.resident.name }}</strong>
+                    <p>{{ summary.topOpportunity.reason }}</p>
+                  </div>
+                  <div class="facility-intelligence-source-grid">
+                    <span>
+                      <small>Coverage</small>
+                      {{ facilitySourceCoverageText(summary) }}
+                    </span>
+                    <span>
+                      <small>Source mix</small>
+                      {{ facilitySourceMixText(summary) }}
+                    </span>
+                    <span>
+                      <small>Sources</small>
+                      {{ facilitySummarySourceText(summary) }}
+                    </span>
+                    <span>
+                      <small>Gap</small>
+                      {{ facilityInputGapText(summary) }}
+                    </span>
+                  </div>
+                </div>
+                <div v-if="summary.topOpportunity" class="action-row-controls facility-intelligence-actions">
+                  <button
+                    v-if="!actionForOpportunity(summary.topOpportunity)"
+                    class="primary-action compact-action"
+                    type="button"
+                    @click="openActionRequestFromOpportunity(summary.topOpportunity, 'DON Facility Intelligence')"
+                  >
+                    <Send :size="14" />
+                    Assign immediate action
+                  </button>
+                  <button
+                    v-else
+                    class="soft-action compact-action"
+                    type="button"
+                    @click="reviewOpportunityAction(summary.topOpportunity)"
+                  >
+                    <FileText :size="14" />
+                    Review action
+                  </button>
+                  <button class="soft-action compact-action" type="button" @click="openResident(summary.topOpportunity.resident)">
+                    <FileText :size="14" />
+                    Review top resident
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p v-else-if="openSituationAccordion === 'facility-intelligence'" class="empty-copy situation-accordion-body">
+              No generated facility intelligence for this facility.
+            </p>
+          </article>
+
+          <article class="situation-accordion panel" :class="{ open: openSituationAccordion === 'current-watches' }">
+          <button
+            class="situation-accordion-header"
+            type="button"
+            :aria-expanded="openSituationAccordion === 'current-watches'"
+            @click="setSituationAccordion('current-watches')"
+          >
+            <span>
+              <strong>Current Watches</strong>
+              <small>{{ filteredPriorityResidents.length }} residents with active watch context</small>
+            </span>
+            <span class="accordion-header-side">
+              <span class="chip compact">{{ filteredPriorityResidents.length }} watches</span>
+              <ChevronUp v-if="openSituationAccordion === 'current-watches'" :size="17" />
+              <ChevronDown v-else :size="17" />
+            </span>
+          </button>
+
+        <div v-if="openSituationAccordion === 'current-watches'" class="situation-layout situation-accordion-body">
           <div class="priority-list">
             <article
               v-for="resident in filteredPriorityResidents"
@@ -4425,12 +5995,13 @@ function isSageNav(view: ViewName) {
                     {{ vital.label }} {{ vital.current }}
                   </span>
                 </div>
-                <button type="button" class="soft-action" @click="openResident(resident)">
-                  Open full chart
+                <button type="button" class="primary-action compact-action" @click="openResident(resident)">
+                  <FileText :size="15" />
+                  Review Chart
                   <ArrowRight :size="15" />
                 </button>
                 <button type="button" class="soft-action" @click="openActionRequestModal(resident, 'DON Situation', 'provider')">
-                  Assign action
+                  Assign immediate action
                   <Send :size="15" />
                 </button>
               </div>
@@ -4492,24 +6063,15 @@ function isSageNav(view: ViewName) {
               </span>
             </div>
             <div class="card-actions">
-              <button type="button" class="soft-action" @click="openResident(activeSituationResident)">
-                Open full chart
-                <ArrowRight :size="15" />
-              </button>
               <button type="button" class="primary-action compact-action" @click="openResident(activeSituationResident)">
-                Review chart
-              </button>
-              <button
-                type="button"
-                class="soft-icon"
-                aria-label="Assign immediate action"
-                @click="openActionRequestModal(activeSituationResident, 'DON Situation', 'provider')"
-              >
-                <Send :size="16" />
+                <FileText :size="15" />
+                Review Chart
               </button>
             </div>
           </aside>
         </div>
+          </article>
+        </section>
       </section>
 
       <section v-else-if="activeView === 'residents'" class="screen">
@@ -4548,13 +6110,15 @@ function isSageNav(view: ViewName) {
 
         <section class="schedule-strip content-frame">
           <article class="panel schedule-panel">
-            <div class="notes-panel-header">
-              <div>
-                <div class="section-label">Residents Schedule</div>
-                <h2>Calendar & clinical work</h2>
+            <div class="notes-panel-header schedule-panel-header">
+              <div class="schedule-title-row">
+                <div>
+                  <div class="section-label">Residents Schedule</div>
+                  <h2>Calendar & clinical work</h2>
+                </div>
               </div>
               <div class="schedule-panel-controls">
-                <span class="chip compact">{{ visibleScheduleItems.length }} items</span>
+                <span class="chip compact schedule-total-chip">{{ visibleScheduleMonthItems.length }} items</span>
                 <button class="primary-action compact-action" type="button" @click="openScheduleModal()">
                   <CalendarDays :size="14" />
                   New Schedule
@@ -4571,8 +6135,8 @@ function isSageNav(view: ViewName) {
                 </div>
               </div>
             </div>
-            <div v-if="visibleScheduleItems.length && scheduleView === 'list'" class="schedule-list">
-              <div v-for="item in visibleScheduleItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row">
+            <div v-if="visibleScheduleMonthItems.length && scheduleView === 'list'" class="schedule-list">
+              <div v-for="item in visibleScheduleMonthItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row">
                 <button class="schedule-row-main" type="button" @click="openScheduleItem(item)">
                   <span class="schedule-icon" :class="item.kind">
                     <Users v-if="item.kind === 'huddle'" :size="17" />
@@ -4588,8 +6152,8 @@ function isSageNav(view: ViewName) {
                   <span class="schedule-time">
                     {{ item.time }}
                   </span>
-                  <span class="chip compact" :class="statusTone(item.tone)">
-                    {{ item.kind }}
+                  <span class="chip compact" :class="scheduleItemTone(item)">
+                    {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
                   </span>
                 </button>
                 <button
@@ -4647,7 +6211,7 @@ function isSageNav(view: ViewName) {
                       class="schedule-more-chip"
                       @click.stop="selectScheduleDay(cell.dateKey)"
                     >
-                      +{{ cell.items.length - 2 }} more
+                      +{{ cell.items.length - 2 }}
                     </button>
                   </div>
                 </div>
@@ -4687,7 +6251,7 @@ function isSageNav(view: ViewName) {
         </div>
       </section>
 
-      <section v-else-if="activeView === 'ai'" class="screen ai-screen">
+      <section v-else-if="activeView === 'ai'" class="screen ai-screen has-prompt-rail">
         <header class="screen-header ai-header">
           <div class="sage-orb">
             <Zap :size="20" />
@@ -4763,128 +6327,343 @@ function isSageNav(view: ViewName) {
           </div>
         </header>
 
-        <div class="role-workspace">
-          <div class="role-main">
-            <article class="panel morning-brief">
-              <div class="section-label">Morning Brief</div>
-              <div class="brief-grid">
-                <span><strong>{{ filteredProviderOpportunities.length }}</strong> attention opportunities</span>
-                <span><strong>{{ providerActionRequests.filter((action) => action.status !== 'completed').length }}</strong> assigned actions</span>
-                <span><strong>7</strong> monthly visits due</span>
-                <span><strong>4</strong> open nurse requests</span>
-              </div>
-            </article>
-
-            <article v-if="providerActionRequests.length" class="panel action-panel">
-              <div class="notes-panel-header">
-                <div>
-                  <div class="section-label">Assigned Actions</div>
-                  <h2>Provider follow-up</h2>
-                </div>
-                <span class="chip compact warning">{{ providerActionRequests.filter((action) => action.status !== 'completed').length }} open</span>
-              </div>
-              <div class="action-list">
-                <div v-for="action in providerActionRequests.slice(0, 4)" :key="action.id" class="action-row">
+        <div class="role-workspace provider-home-workspace">
+          <div class="role-main provider-home-main">
+            <section class="situation-accordion-list provider-home-accordion-list">
+              <article class="situation-accordion panel" :class="{ open: openProviderHomeAccordion === 'review-decide' }">
+                <button
+                  class="situation-accordion-header"
+                  type="button"
+                  :aria-expanded="openProviderHomeAccordion === 'review-decide'"
+                  @click="setProviderHomeAccordion('review-decide')"
+                >
                   <span>
-                    <strong>{{ action.residentName }} · {{ action.actionType }}</strong>
-                    <small>{{ action.instructions }} · {{ action.dueTime }}</small>
+                    <strong>Review & Decide</strong>
+                    <small>{{ providerFocusItems.length }} focus items ranked by urgency</small>
                   </span>
-                  <span class="chip compact" :class="statusTone(action.priority)">
-                    {{ action.priority }}
+                  <span class="accordion-header-side">
+                    <span class="chip compact warning">{{ providerFocusItems.length }} items</span>
+                    <ChevronUp v-if="openProviderHomeAccordion === 'review-decide'" :size="17" />
+                    <ChevronDown v-else :size="17" />
                   </span>
-                  <div class="action-row-controls">
-                    <button class="soft-action compact-action" type="button" @click="openResident(action.residentId)">
-                      Review
-                    </button>
-                    <button class="soft-action compact-action" type="button" @click="updateActionStatus(action, 'completed')">
-                      <Check :size="14" />
-                      Done
-                    </button>
-                    <button class="soft-action compact-action" type="button" @click="updateActionStatus(action, 'flagged')">
-                      <AlertTriangle :size="14" />
-                      Flag
-                    </button>
+                </button>
+                <div v-if="openProviderHomeAccordion === 'review-decide'" class="focus-panel provider-focus-panel situation-accordion-body">
+                  <div class="focus-summary-row">
+                    <span><strong>{{ filteredProviderOpportunities.length }}</strong> Sage predictions</span>
+                    <span><strong>{{ providerActionRequests.filter((action) => action.status !== 'completed').length }}</strong> open actions</span>
+                    <span><strong>{{ clinicalOrders.filter((order) => order.status !== 'completed' && order.status !== 'cancelled').length }}</strong> active orders</span>
                   </div>
-                </div>
-              </div>
-            </article>
-
-            <div class="section-heading">
-              <div>
-                <h2>Clinical Attention Queue</h2>
-                <p>Sage identifies. Provider decides.</p>
-              </div>
-            </div>
-
-            <div class="attention-list">
-              <article
-                v-for="opportunity in filteredProviderOpportunities"
-                :key="opportunity.id"
-                class="panel attention-card"
-              >
-                <div class="attention-head">
-                  <img class="avatar" :src="opportunity.resident.image" :alt="opportunity.resident.name" />
-                  <div>
-                    <strong>{{ opportunity.resident.name }}</strong>
-                    <small>{{ opportunity.facility }} · Room {{ opportunity.resident.room }}</small>
+                  <div v-if="providerFocusItems.length" class="focus-list provider-focus-list">
+                    <article v-for="item in providerFocusItems" :key="item.id" class="focus-row provider-focus-row" :class="item.tone">
+                      <span class="focus-icon" :class="item.tone">
+                        <Zap v-if="item.kind === 'prediction'" :size="16" />
+                        <FileText v-else-if="item.kind === 'order'" :size="16" />
+                        <AlertTriangle v-else-if="item.status.toLowerCase().includes('flagged')" :size="16" />
+                        <CheckCircle v-else :size="16" />
+                      </span>
+                      <span class="focus-copy">
+                        <small>{{ item.meta }}</small>
+                        <strong>{{ item.title }}</strong>
+                        <p>{{ item.body }}</p>
+                        <span class="focus-status-row">
+                          <span class="chip compact" :class="statusTone(item.status)">
+                            {{ item.status }}
+                          </span>
+                        </span>
+                      </span>
+                      <div class="focus-actions">
+                        <button class="primary-action compact-action" type="button" @click="handleFocusItemAction(item)">
+                          {{ item.primaryLabel }}
+                          <ArrowRight :size="14" />
+                        </button>
+                        <button
+                          v-if="item.secondaryAction"
+                          class="soft-action compact-action"
+                          type="button"
+                          @click="handleFocusItemAction(item, item.secondaryAction)"
+                        >
+                          {{ item.secondaryLabel }}
+                        </button>
+                      </div>
+                    </article>
                   </div>
-                  <span class="chip compact" :class="statusTone(opportunity.urgency)">
-                    {{ opportunity.category }}
-                  </span>
-                </div>
-                <p>{{ opportunity.reason }}</p>
-                <ul class="clean-list">
-                  <li v-for="change in opportunity.changes" :key="change">{{ change }}</li>
-                </ul>
-                <div class="card-actions">
-                  <button class="soft-action" type="button" @click="openResident(opportunity.resident)">
-                    Review resident
-                    <ArrowRight :size="15" />
-                  </button>
-                  <button
-                    class="soft-icon"
-                    type="button"
-                    aria-label="Message care team"
-                    @click="openTaggedMessageModal(opportunity)"
-                  >
-                    <MessageCircle :size="16" />
-                  </button>
+                  <p v-else class="empty-copy">
+                    No provider focus items for this facility right now.
+                  </p>
                 </div>
               </article>
-            </div>
+
+              <article class="situation-accordion panel" :class="{ open: openProviderHomeAccordion === 'facility-intelligence' }">
+                <button
+                  class="situation-accordion-header"
+                  type="button"
+                  :aria-expanded="openProviderHomeAccordion === 'facility-intelligence'"
+                  @click="setProviderHomeAccordion('facility-intelligence')"
+                >
+                  <span>
+                    <strong>Facility Intelligence</strong>
+                    <small>{{ filteredFacilityIntelligenceSummaries.length }} facilities · {{ filteredProviderOpportunities.length }} predictions</small>
+                  </span>
+                  <span class="accordion-header-side">
+                    <span class="chip compact">{{ filteredFacilityIntelligenceSummaries.length }} facilities</span>
+                    <ChevronUp v-if="openProviderHomeAccordion === 'facility-intelligence'" :size="17" />
+                    <ChevronDown v-else :size="17" />
+                  </span>
+                </button>
+                <div v-if="openProviderHomeAccordion === 'facility-intelligence'" class="morning-brief situation-accordion-body">
+                  <div v-if="filteredFacilityIntelligenceSummaries.length" class="provider-facility-intelligence-list">
+                    <article
+                      v-for="summary in filteredFacilityIntelligenceSummaries.slice(0, 4)"
+                      :key="summary.facility"
+                      class="facility-intelligence-card"
+                    >
+                      <div class="facility-intelligence-copy">
+                        <div class="facility-intelligence-head">
+                          <strong>{{ summary.facility }}</strong>
+                          <span class="facility-intelligence-status-group">
+                            <span class="chip compact" :class="summary.urgent ? 'danger' : summary.high ? 'warning' : 'success'">
+                              {{ summary.urgent ? "urgent" : summary.high ? "watch" : "routine" }}
+                            </span>
+                            <span class="chip compact facility-intelligence-status-chip" :class="statusTone(facilityReadinessLabel(summary))">
+                              {{ facilityReadinessLabel(summary) }}
+                            </span>
+                          </span>
+                        </div>
+                        <div class="facility-intelligence-metrics">
+                          <span>
+                            <strong>{{ summary.total }}</strong>
+                            predictions
+                          </span>
+                          <span>
+                            <strong>{{ summary.urgent }}</strong>
+                            urgent
+                          </span>
+                          <span>
+                            <strong>{{ summary.high }}</strong>
+                            high
+                          </span>
+                          <span>
+                            <strong>{{ summary.openActions }}</strong>
+                            open actions
+                          </span>
+                        </div>
+                        <div v-if="summary.topOpportunity" class="facility-intelligence-top-resident">
+                          <small>Top resident</small>
+                          <strong>{{ summary.topOpportunity.resident.name }}</strong>
+                          <p>{{ summary.topOpportunity.category }} · {{ summary.topOpportunity.reason }}</p>
+                        </div>
+                        <div class="facility-intelligence-source-grid">
+                          <span>
+                            <small>Coverage</small>
+                            {{ facilitySourceCoverageText(summary) }}
+                          </span>
+                          <span>
+                            <small>Source mix</small>
+                            {{ facilitySourceMixText(summary) }}
+                          </span>
+                          <span>
+                            <small>Gap</small>
+                            {{ facilityInputGapText(summary) }}
+                          </span>
+                          <span>
+                            <small>Sources</small>
+                            {{ facilitySummarySourceText(summary) }}
+                          </span>
+                        </div>
+                      </div>
+                    </article>
+                  </div>
+                  <p v-else class="empty-copy">
+                    No facility intelligence summaries for this facility right now.
+                  </p>
+                </div>
+              </article>
+
+              <article class="situation-accordion panel" :class="{ open: openProviderHomeAccordion === 'assigned-actions' }">
+                <button
+                  class="situation-accordion-header"
+                  type="button"
+                  :aria-expanded="openProviderHomeAccordion === 'assigned-actions'"
+                  @click="setProviderHomeAccordion('assigned-actions')"
+                >
+                  <span>
+                    <strong>Assigned Actions</strong>
+                    <small>{{ providerActionRequests.filter((action) => action.status !== 'completed').length }} open provider follow-ups</small>
+                  </span>
+                  <span class="accordion-header-side">
+                    <span class="chip compact warning">{{ providerActionRequests.filter((action) => action.status !== 'completed').length }} open</span>
+                    <ChevronUp v-if="openProviderHomeAccordion === 'assigned-actions'" :size="17" />
+                    <ChevronDown v-else :size="17" />
+                  </span>
+                </button>
+                <div v-if="openProviderHomeAccordion === 'assigned-actions'" class="action-panel situation-accordion-body">
+                  <div v-if="providerActionRequests.length" class="action-list">
+                    <div v-for="action in providerActionRequests.slice(0, 4)" :key="action.id" class="action-row">
+                      <span>
+                        <strong>{{ action.residentName }} · {{ action.actionType }}</strong>
+                        <small>{{ action.instructions }} · {{ action.dueTime }}</small>
+                      </span>
+                      <span class="chip compact" :class="statusTone(action.priority)">
+                        {{ action.priority }}
+                      </span>
+                      <div class="action-row-controls">
+                        <button class="soft-action compact-action" type="button" @click="openResident(action.residentId)">
+                          Review
+                        </button>
+                        <button class="soft-action compact-action" type="button" @click="handleActionStatusSelection(action, 'completed')">
+                          <Check :size="14" />
+                          {{ actionCompleteLabel(action) }}
+                        </button>
+                        <button class="soft-action compact-action" type="button" @click="handleActionStatusSelection(action, 'flagged')">
+                          <AlertTriangle :size="14" />
+                          {{ actionFlagLabel(action) }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <p v-else class="empty-copy">
+                    No assigned provider actions for this facility right now.
+                  </p>
+                </div>
+              </article>
+
+              <article class="situation-accordion panel" :class="{ open: openProviderHomeAccordion === 'clinical-attention' }">
+                <button
+                  class="situation-accordion-header"
+                  type="button"
+                  :aria-expanded="openProviderHomeAccordion === 'clinical-attention'"
+                  @click="setProviderHomeAccordion('clinical-attention')"
+                >
+                  <span>
+                    <strong>Clinical Attention Queue</strong>
+                    <small>{{ filteredProviderOpportunities.length }} Sage-identified residents</small>
+                  </span>
+                  <span class="accordion-header-side">
+                    <span class="chip compact">{{ filteredProviderOpportunities.length }} residents</span>
+                    <ChevronUp v-if="openProviderHomeAccordion === 'clinical-attention'" :size="17" />
+                    <ChevronDown v-else :size="17" />
+                  </span>
+                </button>
+                <div v-if="openProviderHomeAccordion === 'clinical-attention'" class="provider-attention-body situation-accordion-body">
+                  <div v-if="filteredProviderOpportunities.length" class="attention-list">
+                    <article
+                      v-for="opportunity in filteredProviderOpportunities"
+                      :key="opportunity.id"
+                      class="panel attention-card"
+                    >
+                      <div class="attention-head">
+                        <img class="avatar" :src="opportunity.resident.image" :alt="opportunity.resident.name" />
+                        <div class="attention-head-copy">
+                          <div class="attention-title-row">
+                            <strong>{{ opportunity.resident.name }}</strong>
+                          </div>
+                          <small>{{ opportunity.facility }} · Room {{ opportunity.resident.room }}</small>
+                        </div>
+                      </div>
+                      <div class="attention-status-row">
+                        <span class="chip compact" :class="statusTone(opportunity.urgency)">
+                          {{ opportunity.category }}
+                        </span>
+                        <span class="chip compact" :class="statusTone(opportunityActionStatusLabel(opportunity))">
+                          {{ opportunityActionStatusLabel(opportunity) }}
+                        </span>
+                      </div>
+                      <p>{{ opportunity.reason }}</p>
+                      <div class="context-chip-row">
+                        <span class="chip compact success">{{ opportunity.confidence }}% confidence</span>
+                        <span class="chip compact">{{ opportunitySourceSummary(opportunity) }}</span>
+                      </div>
+                      <div class="delegate-summary">
+                        <span><strong>Next:</strong> {{ opportunity.recommendedAction }}</span>
+                        <div class="evidence-group-list">
+                          <div
+                            v-for="group in opportunityEvidenceGroups(opportunity)"
+                            :key="group.source"
+                            class="evidence-group"
+                          >
+                            <strong>{{ group.source }}:</strong>
+                            <ul>
+                              <li v-for="event in group.events" :key="event.id">
+                                {{ opportunityEvidenceItemText(event) }}
+                              </li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="card-actions clinical-attention-actions">
+                        <div class="clinical-attention-action-buttons">
+                          <button
+                            v-if="!actionForOpportunity(opportunity)"
+                            class="primary-action compact-action clinical-attention-primary-action"
+                            type="button"
+                            @click="openActionRequestFromOpportunity(opportunity, 'Provider Queue')"
+                          >
+                            <Send :size="15" />
+                            Assign action
+                          </button>
+                          <button
+                            v-else
+                            class="soft-action compact-action clinical-attention-primary-action"
+                            type="button"
+                            @click="reviewOpportunityAction(opportunity)"
+                          >
+                            <FileText :size="15" />
+                            Review action
+                          </button>
+                          <div class="clinical-attention-secondary-actions">
+                            <button
+                              class="soft-action compact-action"
+                              type="button"
+                              @click="openResident(opportunity.resident)"
+                            >
+                              Review chart
+                              <ArrowRight :size="15" />
+                            </button>
+                            <button
+                              class="soft-icon"
+                              type="button"
+                              aria-label="Message care team"
+                              @click="openTaggedMessageModal(opportunity)"
+                            >
+                              <MessageCircle :size="16" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  </div>
+                  <p v-else class="empty-copy">
+                    No Sage-identified residents for this facility right now.
+                  </p>
+                </div>
+              </article>
+            </section>
           </div>
 
-          <aside class="role-side">
-            <article class="panel">
-              <div class="section-label">Recent Resident Notes</div>
-              <div class="note-stack">
-                <p v-for="note in filteredProviderNotes.slice(0, 3)" :key="note.id">
-                  <strong>{{ note.residentName }}:</strong> {{ note.title }}
-                </p>
-              </div>
-              <button
-                v-if="filteredProviderOpportunities[0]"
-                class="primary-action compact-action"
-                type="button"
-                @click="openResidentNotes(filteredProviderOpportunities[0].resident)"
-              >
-                <FileText :size="16" />
-                Open resident notes
-              </button>
-              <p v-else class="empty-copy">No provider notes in this facility yet.</p>
-            </article>
-
-            <article class="panel">
-              <div class="section-label">Documentation Review</div>
-              <div class="doc-list">
-                <div v-for="doc in providerDocumentation" :key="doc.id" class="doc-row">
-                  <span>
-                    <strong>{{ doc.title }}</strong>
-                    <small>{{ doc.due }}</small>
-                  </span>
-                  <span class="chip compact" :class="statusTone(doc.status)">{{ doc.status }}</span>
+          <aside class="role-side provider-home-side">
+            <article class="panel provider-side-panel">
+              <div class="notes-panel-header">
+                <div>
+                  <h2>Recent notes</h2>
                 </div>
+                <span class="chip compact">{{ filteredProviderNotes.length }} notes</span>
               </div>
+              <div v-if="filteredProviderNotes.length" class="note-stack">
+                <button
+                  v-for="note in filteredProviderNotes.slice(0, 3)"
+                  :key="note.id"
+                  class="provider-home-note-row"
+                  type="button"
+                  @click="openProviderHomeNote(note)"
+                >
+                  <span>
+                    <strong>{{ note.residentName }}:</strong> {{ note.title }}
+                    <small>{{ providerNoteSourceLabel(note.source) }} · {{ note.createdAt }}</small>
+                  </span>
+                  <ArrowRight :size="15" />
+                </button>
+              </div>
+              <p v-else class="empty-copy">No provider notes in this facility yet.</p>
             </article>
           </aside>
         </div>
@@ -4926,13 +6705,15 @@ function isSageNav(view: ViewName) {
 
         <section class="schedule-strip content-frame">
           <article class="panel schedule-panel">
-            <div class="notes-panel-header">
-              <div>
-                <div class="section-label">Residents Schedule</div>
-                <h2>Calendar & clinical work</h2>
+            <div class="notes-panel-header schedule-panel-header">
+              <div class="schedule-title-row">
+                <div>
+                  <div class="section-label">Residents Schedule</div>
+                  <h2>Calendar & clinical work</h2>
+                </div>
               </div>
               <div class="schedule-panel-controls">
-                <span class="chip compact">{{ visibleScheduleItems.length }} items</span>
+                <span class="chip compact schedule-total-chip">{{ visibleScheduleMonthItems.length }} items</span>
                 <button class="primary-action compact-action" type="button" @click="openScheduleModal()">
                   <CalendarDays :size="14" />
                   New Schedule
@@ -4949,8 +6730,8 @@ function isSageNav(view: ViewName) {
                 </div>
               </div>
             </div>
-            <div v-if="visibleScheduleItems.length && scheduleView === 'list'" class="schedule-list">
-              <div v-for="item in visibleScheduleItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row">
+            <div v-if="visibleScheduleMonthItems.length && scheduleView === 'list'" class="schedule-list">
+              <div v-for="item in visibleScheduleMonthItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row">
                 <button class="schedule-row-main" type="button" @click="openScheduleItem(item)">
                   <span class="schedule-icon" :class="item.kind">
                     <Users v-if="item.kind === 'huddle'" :size="17" />
@@ -4966,8 +6747,8 @@ function isSageNav(view: ViewName) {
                   <span class="schedule-time">
                     {{ item.time }}
                   </span>
-                  <span class="chip compact" :class="statusTone(item.tone)">
-                    {{ item.kind }}
+                  <span class="chip compact" :class="scheduleItemTone(item)">
+                    {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
                   </span>
                 </button>
                 <button
@@ -5025,7 +6806,7 @@ function isSageNav(view: ViewName) {
                       class="schedule-more-chip"
                       @click.stop="selectScheduleDay(cell.dateKey)"
                     >
-                      +{{ cell.items.length - 2 }} more
+                      +{{ cell.items.length - 2 }}
                     </button>
                   </div>
                 </div>
@@ -5057,15 +6838,22 @@ function isSageNav(view: ViewName) {
                   <small v-if="providerOpportunityByResidentId.get(resident.id)">
                     {{ providerOpportunityByResidentId.get(resident.id)?.category }} · {{ providerOpportunityByResidentId.get(resident.id)?.reason }}
                   </small>
+                  <small v-if="providerOpportunityByResidentId.get(resident.id)" class="provider-row-meta">
+                    Surfaced at {{ providerOpportunityByResidentId.get(resident.id)?.surfaced }}
+                  </small>
                   <small v-else>
                     Room {{ resident.room }} · {{ resident.latest }}
                   </small>
                 </span>
-                <span
-                  class="chip compact"
-                  :class="statusTone(providerOpportunityByResidentId.get(resident.id)?.urgency ?? resident.acuity)"
-                >
-                  {{ providerOpportunityByResidentId.get(resident.id)?.surfaced ?? resident.acuity }}
+                <span v-if="resident.statusChips.length" class="provider-status-chips">
+                  <span
+                    v-for="chip in resident.statusChips.slice(0, 2)"
+                    :key="chip"
+                    class="chip compact"
+                    :class="statusTone(chip)"
+                  >
+                    {{ chip }}
+                  </span>
                 </span>
               </button>
             </div>
@@ -5073,7 +6861,7 @@ function isSageNav(view: ViewName) {
         </div>
       </section>
 
-      <section v-else-if="activeView === 'provider-sage'" class="screen ai-screen role-screen">
+      <section v-else-if="activeView === 'provider-sage'" class="screen ai-screen role-screen has-prompt-rail">
         <header class="screen-header ai-header">
           <div class="sage-orb">
             <Zap :size="20" />
@@ -5089,24 +6877,56 @@ function isSageNav(view: ViewName) {
             <div class="section-label">Clinical Read</div>
             <h2>Which residents need attention today?</h2>
             <p>
-              Sage surfaced <strong>23 attention opportunities</strong>. Mary Lou Smith is the
-              highest priority because her change is acute and nursing actions are still pending.
+              Sage surfaced <strong>{{ filteredProviderOpportunities.length }} generated attention opportunities</strong>.
+              <template v-if="filteredProviderOpportunities[0]">
+                {{ filteredProviderOpportunities[0].resident.name }} is highest priority because {{ filteredProviderOpportunities[0].reason.toLowerCase() }}
+              </template>
             </p>
             <div class="attention-band">
               <strong>Suggested next action</strong>
-              <span>Review Mary Lou, confirm UA/culture status, and capture provider instructions for Otangeles Notes+.</span>
+              <span>{{ filteredProviderOpportunities[0]?.recommendedAction ?? "No generated provider actions for this facility right now." }}</span>
             </div>
           </article>
 
-          <article class="bubble structured sage">
-            <p>Provider-ready summary for Mary Lou Smith:</p>
+          <article v-if="filteredProviderOpportunities[0]" class="bubble structured sage">
+            <p>Provider-ready summary for {{ filteredProviderOpportunities[0].resident.name }}:</p>
             <ul>
-              <li>New confusion and restlessness over 14 hours.</li>
-              <li>Temp 100.4, HR 104, BP softer than baseline.</li>
-              <li>CNA reported urine odor overnight; UA not collected yet.</li>
+              <li v-for="change in filteredProviderOpportunities[0].changes" :key="change">{{ change }}</li>
+              <li v-for="event in filteredProviderOpportunities[0].evidence.slice(0, 3)" :key="event.id">
+                {{ opportunityEvidenceText(event) }}
+              </li>
             </ul>
-            <footer>Observation can be routed to Otangeles Notes+ after review.</footer>
+            <footer>{{ filteredProviderOpportunities[0].confidence }}% confidence · {{ opportunitySourceSummary(filteredProviderOpportunities[0]) }}</footer>
           </article>
+
+          <article
+            v-for="message in providerSageMessages"
+            :key="message.id"
+            class="bubble structured"
+            :class="message.from === 'me' ? 'me' : 'sage'"
+          >
+            <p>{{ message.text }}</p>
+            <ul v-if="message.bullets?.length">
+              <li v-for="bullet in message.bullets" :key="bullet">{{ bullet }}</li>
+            </ul>
+            <footer v-if="message.footer">{{ message.footer }}</footer>
+          </article>
+        </div>
+
+        <div v-if="remainingPrompts.length" class="prompt-rail">
+          <div class="section-label">Suggested For You</div>
+          <div class="prompt-scroll">
+            <button
+              v-for="prompt in remainingPrompts"
+              :key="prompt.id"
+              type="button"
+              class="prompt-pill"
+              @click="usePrompt(prompt)"
+            >
+              <component :is="prompt.icon" :size="14" />
+              {{ prompt.label }}
+            </button>
+          </div>
         </div>
 
         <form class="composer" @submit.prevent="sendAi(aiDraft)">
@@ -5134,17 +6954,73 @@ function isSageNav(view: ViewName) {
 
         <div class="role-workspace cna-workspace">
           <div class="role-main">
-            <article class="panel morning-brief">
-              <div class="section-label">Shift Status</div>
-              <div class="brief-grid">
+            <article class="panel focus-panel">
+              <div class="notes-panel-header">
+                <div>
+                  <div class="section-label">Next Care Actions</div>
+                  <h2>What to do next this shift</h2>
+                </div>
+                <span class="chip compact warning">{{ cnaFocusItems.length }} focus items</span>
+              </div>
+              <div class="focus-summary-row">
                 <span><strong>Started</strong> 7:00 AM</span>
-                <span><strong>{{ filteredCnaAssignments.length }}</strong> assigned residents</span>
+                <span><strong>{{ filteredCnaAssignments.length }}</strong> residents</span>
                 <span><strong>{{ cnaActionRequests.filter((action) => action.status !== 'completed').length }}</strong> open actions</span>
                 <span><strong>{{ capturedDebriefCount }}</strong> debriefs captured</span>
               </div>
+              <div v-if="cnaFocusItems.length" class="focus-list">
+                <article v-for="item in cnaFocusItems" :key="item.id" class="focus-row" :class="item.tone">
+                  <span class="focus-icon" :class="item.tone">
+                    <Mic v-if="item.kind === 'debrief'" :size="16" />
+                    <AlertTriangle v-else-if="item.status.toLowerCase().includes('flagged')" :size="16" />
+                    <CheckCircle v-else :size="16" />
+                  </span>
+                  <span class="focus-copy">
+                    <small>{{ item.meta }}</small>
+                    <strong>{{ item.title }}</strong>
+                    <p>{{ item.body }}</p>
+                  </span>
+                  <span class="chip compact" :class="statusTone(item.status)">
+                    {{ item.status }}
+                  </span>
+                  <div class="focus-actions">
+                    <button class="primary-action compact-action" type="button" @click="handleFocusItemAction(item)">
+                      {{ item.primaryLabel }}
+                      <ArrowRight :size="14" />
+                    </button>
+                    <button
+                      v-if="item.secondaryAction"
+                      class="soft-action compact-action"
+                      type="button"
+                      @click="handleFocusItemAction(item, item.secondaryAction)"
+                    >
+                      {{ item.secondaryLabel }}
+                    </button>
+                  </div>
+                </article>
+              </div>
+              <p v-else class="empty-copy">
+                No immediate CNA focus items for this shift.
+              </p>
             </article>
 
-            <article v-if="cnaActionRequests.length" class="panel action-panel">
+            <section v-if="cnaActionRequests.length" class="context-section">
+              <button
+                class="context-toggle"
+                type="button"
+                :aria-expanded="isSectionExpanded('cna-assigned-actions')"
+                @click="toggleSection('cna-assigned-actions')"
+              >
+                <span>
+                  <strong>Assigned Actions</strong>
+                  <small>{{ cnaActionRequests.filter((action) => action.status !== 'completed').length }} open CNA follow-ups</small>
+                </span>
+                <ChevronUp v-if="isSectionExpanded('cna-assigned-actions')" :size="17" />
+                <ChevronDown v-else :size="17" />
+              </button>
+            </section>
+
+            <article v-if="cnaActionRequests.length && isSectionExpanded('cna-assigned-actions')" class="panel action-panel">
               <div class="notes-panel-header">
                 <div>
                   <div class="section-label">Assigned Actions</div>
@@ -5165,20 +7041,36 @@ function isSageNav(view: ViewName) {
                     <button class="soft-action compact-action" type="button" @click="openResident(action.residentId)">
                       View
                     </button>
-                    <button class="soft-action compact-action" type="button" @click="updateActionStatus(action, 'completed')">
+                    <button class="soft-action compact-action" type="button" @click="handleActionStatusSelection(action, 'completed')">
                       <Check :size="14" />
-                      Done
+                      {{ actionCompleteLabel(action) }}
                     </button>
-                    <button class="soft-action compact-action" type="button" @click="updateActionStatus(action, 'flagged')">
+                    <button class="soft-action compact-action" type="button" @click="handleActionStatusSelection(action, 'flagged')">
                       <AlertTriangle :size="14" />
-                      Flag
+                      {{ actionFlagLabel(action) }}
                     </button>
                   </div>
                 </div>
               </div>
             </article>
 
-            <div class="resident-grid">
+            <section class="context-section">
+              <button
+                class="context-toggle"
+                type="button"
+                :aria-expanded="isSectionExpanded('cna-resident-cards')"
+                @click="toggleSection('cna-resident-cards')"
+              >
+                <span>
+                  <strong>Assigned Residents</strong>
+                  <small>{{ filteredCnaAssignments.length }} residents with care reminders</small>
+                </span>
+                <ChevronUp v-if="isSectionExpanded('cna-resident-cards')" :size="17" />
+                <ChevronDown v-else :size="17" />
+              </button>
+            </section>
+
+            <div v-if="isSectionExpanded('cna-resident-cards')" class="resident-grid">
               <article v-for="assignment in filteredCnaAssignments" :key="assignment.id" class="panel cna-card">
                 <div class="attention-head">
                   <img class="avatar" :src="assignment.resident.image" :alt="assignment.resident.name" />
@@ -5197,7 +7089,22 @@ function isSageNav(view: ViewName) {
           </div>
 
           <aside class="role-side">
-            <article class="panel">
+            <section class="context-section">
+              <button
+                class="context-toggle"
+                type="button"
+                :aria-expanded="isSectionExpanded('cna-quick-notes')"
+                @click="toggleSection('cna-quick-notes')"
+              >
+                <span>
+                  <strong>Quick Resident Notes</strong>
+                  <small>3 shift reminders</small>
+                </span>
+                <ChevronUp v-if="isSectionExpanded('cna-quick-notes')" :size="17" />
+                <ChevronDown v-else :size="17" />
+              </button>
+            </section>
+            <article v-if="isSectionExpanded('cna-quick-notes')" class="panel">
               <div class="section-label">Quick Resident Notes</div>
               <div class="note-stack">
                 <p>Mary Lou ate less than usual and needs fluid encouragement.</p>
@@ -5321,11 +7228,11 @@ function isSageNav(view: ViewName) {
                     {{ action.status.replace("-", " ") }}
                   </span>
                   <div class="action-row-controls">
-                    <button class="soft-action compact-action" type="button" @click="updateActionStatus(action, 'completed')">
-                      Done
+                    <button class="soft-action compact-action" type="button" @click="handleActionStatusSelection(action, 'completed')">
+                      {{ actionCompleteLabel(action) }}
                     </button>
-                    <button class="soft-action compact-action" type="button" @click="updateActionStatus(action, 'flagged')">
-                      Flag
+                    <button class="soft-action compact-action" type="button" @click="handleActionStatusSelection(action, 'flagged')">
+                      {{ actionFlagLabel(action) }}
                     </button>
                   </div>
                 </div>
@@ -5413,13 +7320,15 @@ function isSageNav(view: ViewName) {
 
         <section class="schedule-strip content-frame">
           <article class="panel schedule-panel">
-            <div class="notes-panel-header">
-              <div>
-                <div class="section-label">Residents Schedule</div>
-                <h2>Calendar & clinical work</h2>
+            <div class="notes-panel-header schedule-panel-header">
+              <div class="schedule-title-row">
+                <div>
+                  <div class="section-label">Residents Schedule</div>
+                  <h2>Calendar & clinical work</h2>
+                </div>
               </div>
               <div class="schedule-panel-controls">
-                <span class="chip compact">{{ visibleScheduleItems.length }} items</span>
+                <span class="chip compact schedule-total-chip">{{ visibleScheduleMonthItems.length }} items</span>
                 <button class="primary-action compact-action" type="button" @click="openScheduleModal()">
                   <CalendarDays :size="14" />
                   New Schedule
@@ -5436,8 +7345,8 @@ function isSageNav(view: ViewName) {
                 </div>
               </div>
             </div>
-            <div v-if="visibleScheduleItems.length && scheduleView === 'list'" class="schedule-list">
-              <div v-for="item in visibleScheduleItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row">
+            <div v-if="visibleScheduleMonthItems.length && scheduleView === 'list'" class="schedule-list">
+              <div v-for="item in visibleScheduleMonthItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row">
                 <button class="schedule-row-main" type="button" @click="openScheduleItem(item)">
                   <span class="schedule-icon" :class="item.kind">
                     <Users v-if="item.kind === 'huddle'" :size="17" />
@@ -5453,8 +7362,8 @@ function isSageNav(view: ViewName) {
                   <span class="schedule-time">
                     {{ item.time }}
                   </span>
-                  <span class="chip compact" :class="statusTone(item.tone)">
-                    {{ item.kind }}
+                  <span class="chip compact" :class="scheduleItemTone(item)">
+                    {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
                   </span>
                 </button>
                 <button
@@ -5512,7 +7421,7 @@ function isSageNav(view: ViewName) {
                       class="schedule-more-chip"
                       @click.stop="selectScheduleDay(cell.dateKey)"
                     >
-                      +{{ cell.items.length - 2 }} more
+                      +{{ cell.items.length - 2 }}
                     </button>
                   </div>
                 </div>
@@ -5536,7 +7445,7 @@ function isSageNav(view: ViewName) {
             <div class="snapshot-grid">
               <span><strong>Care preference</strong>{{ assignment.reminder }}</span>
               <span><strong>Watch for</strong>{{ assignment.watchFor }}</span>
-              <span><strong>Recent change</strong>{{ assignment.resident.situation.summary }}</span>
+              <span class="snapshot-row-full"><strong>Recent change</strong>{{ assignment.resident.situation.summary }}</span>
             </div>
           </article>
         </div>
@@ -5775,6 +7684,35 @@ function isSageNav(view: ViewName) {
                 <input v-model="activeProfile.specialization" type="text" />
               </label>
             </div>
+            <div class="settings-card-actions">
+              <span class="form-hint">Last applied: {{ profileChangesAppliedAt[selectedRole] }}</span>
+              <button class="primary-action compact-action" type="button" @click="applyProfileChanges">
+                <Check :size="16" />
+                Apply changes
+              </button>
+            </div>
+          </article>
+
+          <article class="panel settings-card">
+            <div class="settings-detail-head">
+              <FileText :size="22" />
+              <div>
+                <div class="section-label">Otangeles Notes+</div>
+                <h2>{{ otangelesAccount.status }}</h2>
+                <p>Clinical documentation routing and practice administration for this workspace.</p>
+              </div>
+            </div>
+            <div class="delegate-summary">
+              <span><strong>Connected as:</strong> {{ otangelesAccount.connectedAs }}</span>
+              <span><strong>Workspace:</strong> {{ otangelesAccount.workspace }}</span>
+              <span><strong>Sync:</strong> {{ otangelesAccount.syncScope }}</span>
+              <span><strong>Practice Admin:</strong> {{ otangelesAccount.practiceAdmin }} · {{ otangelesAccount.adminRole }}</span>
+              <span><strong>Admin Contact:</strong> {{ otangelesAccount.adminContact }}</span>
+            </div>
+            <button type="button" class="soft-action" @click="openExternalResource('Otangeles Practice Admin')">
+              <MessageCircle :size="16" />
+              Contact Practice Admin
+            </button>
           </article>
 
           <article class="panel settings-card">
@@ -5844,15 +7782,12 @@ function isSageNav(view: ViewName) {
             <div class="modal-form">
               <label>
                 Default Facility
-                <select v-model="activeProfile.defaultFacility" @change="setDefaultFacility(activeProfile.defaultFacility)">
-                  <option
-                    v-for="facility in roleFacilityOptions(selectedRole)"
-                    :key="facility"
-                    :value="facility"
-                  >
-                    {{ facilityOptionLabel(facility) }}
-                  </option>
-                </select>
+                <AppSelect
+                  :model-value="activeProfile.defaultFacility"
+                  :options="roleFacilitySelectOptions"
+                  aria-label="Select default facility"
+                  @update:model-value="setDefaultFacility"
+                />
               </label>
             </div>
             <div class="radio-card-list" role="radiogroup" aria-label="Time format">
@@ -5916,18 +7851,19 @@ function isSageNav(view: ViewName) {
             <div class="modal-form settings-form compact-settings-form">
               <label>
                 Appearance
-                <select v-model="activeProfile.appearance">
-                  <option>System</option>
-                  <option>Light</option>
-                  <option>Dark</option>
-                </select>
+                <AppSelect
+                  v-model="activeProfile.appearance"
+                  :options="appearanceSelectOptions"
+                  aria-label="Select appearance"
+                />
               </label>
               <label>
                 Language
-                <select v-model="activeProfile.language">
-                  <option>English (US)</option>
-                  <option>Spanish</option>
-                </select>
+                <AppSelect
+                  v-model="activeProfile.language"
+                  :options="languageSelectOptions"
+                  aria-label="Select language"
+                />
               </label>
             </div>
           </article>
@@ -6095,6 +8031,13 @@ function isSageNav(view: ViewName) {
                     <input v-model="activeProfile.specialization" type="text" />
                   </label>
                 </div>
+                <div class="settings-card-actions">
+                  <span class="form-hint">Last applied: {{ profileChangesAppliedAt[selectedRole] }}</span>
+                  <button class="primary-action compact-action" type="button" @click="applyProfileChanges">
+                    <Check :size="16" />
+                    Apply changes
+                  </button>
+                </div>
               </template>
 
               <template v-else-if="activeSettingsPanel === 'assignments'">
@@ -6233,18 +8176,19 @@ function isSageNav(view: ViewName) {
                 <div class="modal-form settings-form">
                   <label>
                     Appearance
-                    <select v-model="activeProfile.appearance">
-                      <option>System</option>
-                      <option>Light</option>
-                      <option>Dark</option>
-                    </select>
+                    <AppSelect
+                      v-model="activeProfile.appearance"
+                      :options="appearanceSelectOptions"
+                      aria-label="Select appearance"
+                    />
                   </label>
                   <label>
                     Language
-                    <select v-model="activeProfile.language">
-                      <option>English (US)</option>
-                      <option>Spanish</option>
-                    </select>
+                    <AppSelect
+                      v-model="activeProfile.language"
+                      :options="languageSelectOptions"
+                      aria-label="Select language"
+                    />
                   </label>
                 </div>
               </template>
@@ -6261,15 +8205,12 @@ function isSageNav(view: ViewName) {
                 <div class="modal-form settings-form">
                   <label>
                     Default Facility
-                    <select v-model="activeProfile.defaultFacility" @change="setDefaultFacility(activeProfile.defaultFacility)">
-                      <option
-                        v-for="facility in roleFacilityOptions(selectedRole)"
-                        :key="facility"
-                        :value="facility"
-                      >
-                        {{ facilityOptionLabel(facility) }}
-                      </option>
-                    </select>
+                    <AppSelect
+                      :model-value="activeProfile.defaultFacility"
+                      :options="roleFacilitySelectOptions"
+                      aria-label="Select default facility"
+                      @update:model-value="setDefaultFacility"
+                    />
                   </label>
                 </div>
                 <div class="radio-card-list" role="radiogroup" aria-label="Time format">
@@ -6320,6 +8261,7 @@ function isSageNav(view: ViewName) {
       >
         <span :class="{ 'sage-tab': isSageNav(item.key) }">
           <component :is="item.icon" :size="isSageNav(item.key) ? 23 : 20" />
+          <span v-if="navBadgeCount(item.key)" class="nav-badge">{{ navBadgeCount(item.key) }}</span>
         </span>
         <small>{{ item.label }}</small>
       </button>
@@ -6360,9 +8302,10 @@ function isSageNav(view: ViewName) {
               <input v-model="activeProfile.specialization" type="text" />
             </label>
           </div>
-          <button class="primary-action" type="button" @click="closeProfileModal">
+          <span class="form-hint">Last applied: {{ profileChangesAppliedAt[selectedRole] }}</span>
+          <button class="primary-action" type="button" @click="applyProfileChanges(); closeProfileModal()">
             <Check :size="16" />
-            Save Profile
+            Apply changes
           </button>
         </template>
 
@@ -6480,18 +8423,19 @@ function isSageNav(view: ViewName) {
           <div class="modal-form">
             <label>
               Appearance
-              <select v-model="activeProfile.appearance">
-                <option>System</option>
-                <option>Light</option>
-                <option>Dark</option>
-              </select>
+              <AppSelect
+                v-model="activeProfile.appearance"
+                :options="appearanceSelectOptions"
+                aria-label="Select appearance"
+              />
             </label>
             <label>
               Language
-              <select v-model="activeProfile.language">
-                <option>English (US)</option>
-                <option>Spanish</option>
-              </select>
+              <AppSelect
+                v-model="activeProfile.language"
+                :options="languageSelectOptions"
+                aria-label="Select language"
+              />
             </label>
           </div>
           <button class="primary-action" type="button" @click="closeProfileModal">
@@ -6506,15 +8450,12 @@ function isSageNav(view: ViewName) {
           <div class="modal-form">
             <label>
               Default Facility
-              <select v-model="activeProfile.defaultFacility" @change="setDefaultFacility(activeProfile.defaultFacility)">
-                <option
-                  v-for="facility in roleFacilityOptions(selectedRole)"
-                  :key="facility"
-                  :value="facility"
-                >
-                  {{ facilityOptionLabel(facility) }}
-                </option>
-              </select>
+              <AppSelect
+                :model-value="activeProfile.defaultFacility"
+                :options="roleFacilitySelectOptions"
+                aria-label="Select default facility"
+                @update:model-value="setDefaultFacility"
+              />
             </label>
           </div>
           <div class="radio-card-list" role="radiogroup" aria-label="Time format">
@@ -6571,11 +8512,11 @@ function isSageNav(view: ViewName) {
         <div class="modal-form settings-form">
           <label>
             Urgency
-            <select v-model="escalationDraft.urgency">
-              <option>Stat</option>
-              <option>High</option>
-              <option>Routine</option>
-            </select>
+            <AppSelect
+              v-model="escalationDraft.urgency"
+              :options="prioritySelectOptions"
+              aria-label="Select escalation urgency"
+            />
           </label>
           <label>
             Destination Hospital / ED
@@ -6605,6 +8546,7 @@ function isSageNav(view: ViewName) {
         </label>
         <button
           class="primary-action"
+          :class="{ 'danger-primary': canDirectlyEscalate() }"
           type="button"
           :disabled="!escalationDraft.reason.trim()"
           @click="submitEscalation"
@@ -6650,8 +8592,8 @@ function isSageNav(view: ViewName) {
                 <strong>{{ item.timeLabel }} · {{ item.title }}</strong>
                 <small>{{ item.residentName }} · {{ item.detail }}</small>
               </span>
-              <span class="chip compact" :class="statusTone(item.tone)">
-                {{ item.kind }}
+              <span class="chip compact" :class="scheduleItemTone(item)">
+                {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
               </span>
             </button>
             <button
@@ -6680,10 +8622,8 @@ function isSageNav(view: ViewName) {
         <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeScheduleModal">
           <X :size="18" />
         </button>
-        <h2>{{ editingClinicalOrderId ? "Edit Clinical Order" : "New Schedule" }}</h2>
-        <p>
-          Create huddles, follow-up reminders, and Provider-only order drafts for resident care coordination.
-        </p>
+        <h2>{{ scheduleModalCopy.title }}</h2>
+        <p>{{ scheduleModalCopy.description }}</p>
         <div class="context-chip-row">
           <span v-if="scheduleModalResident" class="chip warning">@{{ scheduleModalResident.name }}</span>
           <span class="chip compact">{{ formatDateLabel(scheduleDraft.date) }} · {{ formatTimeInput(scheduleDraft.time) }}</span>
@@ -6691,19 +8631,21 @@ function isSageNav(view: ViewName) {
         <div class="modal-form settings-form">
           <label>
             Event Category
-            <select :value="scheduleDraft.type" @change="handleScheduleTypeChange">
-              <option value="huddle">Huddle</option>
-              <option value="follow-up">Follow-up</option>
-              <option v-if="selectedRole === 'provider'" value="clinical-order">Clinical Order</option>
-            </select>
+            <AppSelect
+              :model-value="scheduleDraft.type"
+              :options="scheduleTypeSelectOptions"
+              aria-label="Select event category"
+              @update:model-value="setScheduleType"
+            />
           </label>
           <label>
             Event Type
-            <select :value="scheduleDraft.eventType" @change="handleScheduleEventTypeChange">
-              <option v-for="eventType in scheduleEventTypeOptions" :key="eventType" :value="eventType">
-                {{ eventType }}
-              </option>
-            </select>
+            <AppSelect
+              :model-value="scheduleDraft.eventType"
+              :options="scheduleEventSelectOptions"
+              aria-label="Select event type"
+              @update:model-value="setScheduleEventType"
+            />
           </label>
           <label>
             Date
@@ -6830,10 +8772,11 @@ function isSageNav(view: ViewName) {
           <div class="modal-form settings-form">
             <label>
               Call Type
-              <select v-model="scheduleDraft.callMode">
-                <option value="voice-call">Voice call</option>
-                <option value="video-call">Video call</option>
-              </select>
+              <AppSelect
+                v-model="scheduleDraft.callMode"
+                :options="callModeSelectOptions"
+                aria-label="Select call type"
+              />
             </label>
           </div>
         </template>
@@ -6849,11 +8792,11 @@ function isSageNav(view: ViewName) {
           <div class="modal-form settings-form">
             <label>
               Priority
-              <select v-model="scheduleDraft.priority">
-                <option>Stat</option>
-                <option>High</option>
-                <option>Routine</option>
-              </select>
+              <AppSelect
+                v-model="scheduleDraft.priority"
+                :options="prioritySelectOptions"
+                aria-label="Select order priority"
+              />
             </label>
           </div>
           <div class="modal-form">
@@ -6872,7 +8815,7 @@ function isSageNav(view: ViewName) {
           </div>
           <div class="delegate-summary">
             <span><strong>Destination:</strong> Otangeles Notes+</span>
-            <span><strong>Status:</strong> {{ editingClinicalOrderId ? "Editing draft" : "New draft" }}</span>
+            <span><strong>Status:</strong> {{ editingClinicalOrderId ? "Editing order" : "New order" }}</span>
           </div>
         </template>
 
@@ -6885,7 +8828,7 @@ function isSageNav(view: ViewName) {
             @click="saveScheduleDraft(false)"
           >
             <Clock :size="16" />
-            Schedule
+            Schedule Huddle
           </button>
           <button
             class="primary-action"
@@ -6896,89 +8839,7 @@ function isSageNav(view: ViewName) {
             <Video v-if="scheduleDraft.type === 'huddle' && scheduleDraft.callMode === 'video-call'" :size="16" />
             <Phone v-else-if="scheduleDraft.type === 'huddle'" :size="16" />
             <FileText v-else :size="16" />
-            {{ scheduleDraft.type === "huddle" ? "Start Huddle Now" : scheduleDraft.type === "clinical-order" ? "Save Order Draft" : "Save Follow-up" }}
-          </button>
-        </div>
-      </article>
-    </div>
-
-    <div v-if="huddleModalResident" class="modal-backdrop" @click="closeHuddleModal">
-      <article class="modal-card profile-modal huddle-modal" @click.stop>
-        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeHuddleModal">
-          <X :size="18" />
-        </button>
-        <h2>Schedule Huddle</h2>
-        <p>Create a resident-tagged care-team huddle and optionally start the group call now.</p>
-        <div class="context-chip-row">
-          <span class="chip warning">@{{ huddleModalResident.name }}</span>
-          <span class="chip compact">{{ residentFacility(huddleModalResident) }}</span>
-        </div>
-        <div class="modal-form settings-form">
-          <label>
-            Huddle Title
-            <input v-model="huddleDraft.title" type="text" />
-          </label>
-          <label>
-            Scheduled For
-            <input v-model="huddleDraft.scheduledFor" type="text" />
-          </label>
-          <label>
-            Duration
-            <input v-model="huddleDraft.duration" type="text" />
-          </label>
-          <label>
-            Call Type
-            <select v-model="huddleDraft.callMode">
-              <option value="voice-call">Voice call</option>
-              <option value="video-call">Video call</option>
-            </select>
-          </label>
-        </div>
-        <div class="modal-form">
-          <label>
-            Agenda
-            <textarea v-model="huddleDraft.agenda" rows="3" />
-          </label>
-        </div>
-        <div class="recipient-picker">
-          <div class="section-label">Participants</div>
-          <button
-            v-for="user in clinicalRecipients"
-            :key="user.id"
-            type="button"
-            class="recipient-row"
-            :class="{ selected: huddleDraft.participantIds.includes(user.id) }"
-            @click="toggleHuddleParticipant(user.id)"
-          >
-            <span class="staff-avatar" aria-hidden="true">
-              <UserIcon :size="17" />
-            </span>
-            <span>
-              <strong>{{ user.name }}</strong>
-              <small>{{ user.role }} · {{ presenceText(user) }}</small>
-            </span>
-            <Check v-if="huddleDraft.participantIds.includes(user.id)" :size="16" />
-          </button>
-        </div>
-        <div class="modal-actions">
-          <button
-            class="soft-action"
-            type="button"
-            :disabled="!huddleDraft.title.trim() || huddleDraft.participantIds.length === 0"
-            @click="saveScheduledHuddle(false)"
-          >
-            <Clock :size="16" />
-            Schedule
-          </button>
-          <button
-            class="primary-action"
-            type="button"
-            :disabled="!huddleDraft.title.trim() || huddleDraft.participantIds.length === 0"
-            @click="saveScheduledHuddle(true)"
-          >
-            <Video v-if="huddleDraft.callMode === 'video-call'" :size="16" />
-            <Phone v-else :size="16" />
-            Start Huddle Now
+            {{ scheduleDraft.type === "huddle" ? "Start Huddle Now" : scheduleDraft.type === "clinical-order" ? "Save Order" : "Save Follow-up" }}
           </button>
         </div>
       </article>
@@ -7049,42 +8910,44 @@ function isSageNav(view: ViewName) {
         <div class="modal-form settings-form">
           <label>
             Resident
-            <select v-model="actionDraft.residentId">
-              <option v-for="resident in filteredResidents" :key="resident.id" :value="resident.id">
-                {{ resident.name }} · Room {{ resident.room }}
-              </option>
-            </select>
+            <AppSelect
+              v-model="actionDraft.residentId"
+              :options="actionResidentSelectOptions"
+              aria-label="Select resident"
+            />
           </label>
           <label>
             Assign To Role
-            <select :value="actionDraft.assignedRole" @change="handleActionRoleChange">
-              <option value="provider">Provider</option>
-              <option value="cna">CNA</option>
-            </select>
+            <AppSelect
+              :model-value="actionDraft.assignedRole"
+              :options="actionRoleSelectOptions"
+              aria-label="Select action role"
+              @update:model-value="setActionAssignedRole($event as ActionTargetRole)"
+            />
           </label>
           <label>
             Staff Member
-            <select v-model="actionDraft.assignedUserId">
-              <option v-for="user in actionAssigneeOptions" :key="user.id" :value="user.id">
-                {{ user.name }} · {{ user.role }}
-              </option>
-            </select>
+            <AppSelect
+              v-model="actionDraft.assignedUserId"
+              :options="actionAssigneeSelectOptions"
+              aria-label="Select staff member"
+            />
           </label>
           <label>
             Action Type
-            <select v-model="actionDraft.actionType">
-              <option v-for="actionType in actionTypeOptions" :key="actionType" :value="actionType">
-                {{ actionType }}
-              </option>
-            </select>
+            <AppSelect
+              v-model="actionDraft.actionType"
+              :options="actionTypeSelectOptions"
+              aria-label="Select action type"
+            />
           </label>
           <label>
             Priority
-            <select v-model="actionDraft.priority">
-              <option>Stat</option>
-              <option>High</option>
-              <option>Routine</option>
-            </select>
+            <AppSelect
+              v-model="actionDraft.priority"
+              :options="prioritySelectOptions"
+              aria-label="Select priority"
+            />
           </label>
           <label>
             Due Time
@@ -7113,6 +8976,121 @@ function isSageNav(view: ViewName) {
           <Send :size="16" />
           Assign Action
         </button>
+      </article>
+    </div>
+
+    <div v-if="actionStatusModalAction" class="modal-backdrop" @click="closeActionStatusModal">
+      <article class="modal-card profile-modal" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeActionStatusModal">
+          <X :size="18" />
+        </button>
+        <h2>{{ actionStatusModalCopy.title }}</h2>
+        <p>{{ actionStatusModalCopy.description }}</p>
+        <div class="context-chip-row">
+          <span class="chip warning">@{{ actionStatusModalAction.residentName }}</span>
+          <span class="chip compact" :class="statusTone(actionStatusModalAction.priority)">
+            {{ actionStatusModalAction.priority }}
+          </span>
+        </div>
+        <div class="delegate-summary">
+          <span><strong>Action:</strong> {{ actionStatusModalAction.actionType }}</span>
+          <span><strong>Due:</strong> {{ actionStatusModalAction.dueTime }}</span>
+          <span><strong>Instructions:</strong> {{ actionStatusModalAction.instructions }}</span>
+        </div>
+        <div class="modal-form">
+          <label>
+            {{ actionStatusModalCopy.noteLabel }}
+            <textarea
+              v-model="actionStatusDraft.note"
+              rows="3"
+              :placeholder="actionStatusModalCopy.placeholder"
+            />
+          </label>
+          <span v-if="actionStatusDraft.status === 'flagged'" class="form-hint">
+            Required so the nurse, provider, and DON know what needs review.
+          </span>
+        </div>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="closeActionStatusModal">
+            Cancel
+          </button>
+          <button
+            class="primary-action"
+            :class="{ 'danger-primary': actionStatusDraft.status === 'flagged' }"
+            type="button"
+            :disabled="!actionStatusCanSubmit"
+            @click="submitActionStatusUpdate"
+          >
+            <AlertTriangle v-if="actionStatusDraft.status === 'flagged'" :size="16" />
+            <Check v-else :size="16" />
+            {{ actionStatusModalCopy.submitLabel }}
+          </button>
+        </div>
+      </article>
+    </div>
+
+    <div v-if="encounterModalNote" class="modal-backdrop" @click="closeEncounterModal">
+      <article class="modal-card profile-modal" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeEncounterModal">
+          <X :size="18" />
+        </button>
+        <h2>Create an Encounter</h2>
+        <p>This will create an encounter in Otangeles Notes+ for clinical review.</p>
+        <div class="delegate-summary">
+          <span><strong>Source note:</strong> {{ encounterModalNote.title }}</span>
+          <span><strong>Captured:</strong> {{ providerNoteSourceLabel(encounterModalNote.source) }} · {{ encounterModalNote.createdAt }}</span>
+        </div>
+        <div class="modal-form">
+          <label>
+            Resident Name
+            <input v-model="encounterModalDraft.residentName" type="text" />
+          </label>
+          <label>
+            Visit Type
+            <AppSelect
+              v-model="encounterModalDraft.visitType"
+              :options="visitTypeSelectOptions"
+              aria-label="Select encounter visit type"
+            />
+          </label>
+          <label>
+            Notes
+            <textarea v-model="encounterModalDraft.notes" rows="6" />
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="closeEncounterModal">
+            Cancel
+          </button>
+          <button
+            class="primary-action"
+            type="button"
+            :disabled="!encounterModalDraft.residentName.trim() || !encounterModalDraft.notes.trim()"
+            @click="submitEncounterModal"
+          >
+            <FileText :size="16" />
+            Create an Encounter
+          </button>
+        </div>
+      </article>
+    </div>
+
+    <div v-if="deleteProviderNoteTarget" class="modal-backdrop" @click="closeDeleteProviderNoteModal">
+      <article class="modal-card" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeDeleteProviderNoteModal">
+          <X :size="18" />
+        </button>
+        <h2>Delete note?</h2>
+        <p>
+          This removes {{ deleteProviderNoteTarget.title }} from {{ deleteProviderNoteTarget.residentName }}'s provider notes.
+        </p>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="closeDeleteProviderNoteModal">Cancel</button>
+          <button class="danger-action" type="button" @click="confirmDeleteProviderNote">
+            <X :size="16" />
+            Delete
+          </button>
+        </div>
       </article>
     </div>
 
