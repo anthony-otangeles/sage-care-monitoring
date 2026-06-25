@@ -4,8 +4,10 @@ import {
   Activity,
   AlertCircle,
   AlertTriangle,
+  ArrowDownRight,
   ArrowLeft,
   ArrowRight,
+  ArrowUpRight,
   Bell,
   Briefcase,
   CalendarDays,
@@ -83,6 +85,7 @@ type ViewName =
   | "provider-residents"
   | "provider-sage"
   | "provider-collaboration"
+  | "provider-visit"
   | "provider-profile"
   | "cna-home"
   | "cna-debrief"
@@ -93,6 +96,8 @@ type ResidentTab = "situation" | "talk" | "timeline" | "notes";
 type ResidentContextTab = "updates" | "actions" | "orders";
 type SituationAccordionKey = "facility-focus" | "requested-actions" | "facility-intelligence" | "current-watches";
 type ProviderHomeAccordionKey = "review-decide" | "facility-intelligence" | "assigned-actions" | "clinical-attention";
+type VisitNoteMode = "text" | "voice";
+type ProviderVisitStatus = "in-progress" | "completed";
 type MessageTab = "threads" | "new";
 type ScheduleView = "list" | "calendar";
 type ScheduleDraftType = "huddle" | "follow-up" | "clinical-order";
@@ -250,6 +255,21 @@ interface ProviderNote {
   createdAt: string;
   status: "note" | "draft-created" | "ready-for-ehr";
   encounterDraft?: EncounterDraft;
+}
+
+interface ProviderVisit {
+  id: string;
+  residentId: string;
+  residentName: string;
+  providerName: string;
+  visitType: VisitType;
+  startedAt: string;
+  startedAtMs: number;
+  endedAt?: string;
+  textNote: string;
+  voiceTranscript: string;
+  orderIds: string[];
+  status: ProviderVisitStatus;
 }
 
 interface EncounterModalDraft {
@@ -422,8 +442,22 @@ interface CareUpdate {
   sortOrder: number;
 }
 
+type ResidentTimelineKind =
+  | "signal"
+  | "debrief"
+  | "provider-note"
+  | "order"
+  | "action"
+  | "escalation"
+  | "huddle"
+  | "follow-up"
+  | "visit";
+
 interface ResidentTimelineEvent {
   id: string;
+  kind: ResidentTimelineKind;
+  sourceId?: string;
+  threadId?: string;
   timeAgo: string;
   period: string;
   icon: string;
@@ -906,6 +940,21 @@ const initialProviderNotes: ProviderNote[] = [
   },
 ];
 
+const initialProviderVisits: ProviderVisit[] = initialProviderNotes.map((note, index) => ({
+  id: `visit-${note.id}`,
+  residentId: note.residentId,
+  residentName: note.residentName,
+  providerName: index === 0 ? providerUser.name : "Dr. Aisha Rahman",
+  visitType: note.encounterDraft?.visitType ?? "Follow-Up",
+  startedAt: note.createdAt,
+  startedAtMs: Date.now() - (index + 2) * 45 * 60 * 1000,
+  endedAt: note.createdAt,
+  textNote: note.source === "typed" ? note.body : "",
+  voiceTranscript: note.source === "voice" ? note.body : "",
+  orderIds: [],
+  status: "completed",
+}));
+
 const cnaAssignments: CnaAssignment[] = [
   {
     id: "ca-1",
@@ -1259,6 +1308,15 @@ const cnaResidentSearchQuery = ref("");
 const scheduleView = ref<ScheduleView>("list");
 const providerNoteDraft = ref("");
 const providerNotesState = ref<ProviderNote[]>([...initialProviderNotes]);
+const providerVisitsState = ref<ProviderVisit[]>(
+  initialProviderVisits.map((visit) => ({ ...visit, orderIds: [...visit.orderIds] })),
+);
+const activeVisitId = ref<string | null>(null);
+const visitNoteMode = ref<VisitNoteMode>("text");
+const visitRecordingActive = ref(false);
+const visitRecordingSeconds = ref(0);
+const visitElapsedSeconds = ref(0);
+const visitStopConfirmOpen = ref(false);
 const expandedProviderNoteId = ref<string | null>(null);
 const encounterModalNoteId = ref<string | null>(null);
 const encounterModalDraft = ref<EncounterModalDraft>({
@@ -1287,6 +1345,8 @@ const cnaDebriefs = ref<CnaDebriefEntry[]>(
 
 let providerRecordingTimer: number | null = null;
 let cnaRecordingTimer: number | null = null;
+let visitRecordingTimer: number | null = null;
+let visitElapsedTimer: number | null = null;
 
 const profileStates = ref<Record<RoleKey, ProfileState>>({
   don: { ...initialProfileStates.don, assignedFacilities: [...initialProfileStates.don.assignedFacilities] },
@@ -1586,6 +1646,42 @@ const filteredProviderNotes = computed(() =>
     const resident = residents.find((entry) => entry.id === note.residentId);
     return !resident || selectedFacility.value === "all" || residentFacility(resident) === selectedFacility.value;
   }),
+);
+const activeProviderVisit = computed(() =>
+  activeVisitId.value
+    ? providerVisitsState.value.find((visit) => visit.id === activeVisitId.value) ?? null
+    : null,
+);
+const activeVisitResident = computed(() =>
+  activeProviderVisit.value
+    ? residents.find((resident) => resident.id === activeProviderVisit.value?.residentId) ?? null
+    : null,
+);
+const activeVisitOrders = computed(() => {
+  const visit = activeProviderVisit.value;
+  if (!visit) {
+    return [];
+  }
+  return visit.orderIds
+    .map((orderId) => clinicalOrders.value.find((order) => order.id === orderId) ?? null)
+    .filter((order): order is ClinicalOrder => Boolean(order));
+});
+const visitElapsedLabel = computed(() => {
+  const seconds = visitElapsedSeconds.value;
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s`;
+});
+const selectedResidentVisits = computed(() =>
+  selectedResident.value
+    ? providerVisitsState.value
+        .filter((visit) => visit.residentId === selectedResident.value?.id)
+        .slice()
+        .sort((a, b) => b.startedAtMs - a.startedAtMs)
+    : [],
 );
 const providerOpportunityByResidentId = computed(() => {
   const map = new Map<string, ProviderOpportunity>();
@@ -2915,6 +3011,7 @@ function timelineEventFromStaticResidentEvent(
 ): ResidentTimelineEvent {
   return {
     id: `resident-${event.id}`,
+    kind: "signal",
     timeAgo: event.timeAgo,
     period: event.period,
     icon: event.icon,
@@ -2939,6 +3036,8 @@ function timelineEventsForResident(resident: Resident) {
     const capturedAt = entry.capturedAt ?? "Current shift";
     events.push({
       id: `timeline-debrief-${entry.assignmentId}`,
+      kind: "debrief",
+      sourceId: entry.assignmentId,
       timeAgo: capturedAt,
       period: "CNA debrief",
       icon: "file-text",
@@ -2957,6 +3056,8 @@ function timelineEventsForResident(resident: Resident) {
     }
     events.push({
       id: `timeline-note-${note.id}`,
+      kind: "provider-note",
+      sourceId: note.id,
       timeAgo: note.createdAt,
       period: "Provider note",
       icon: "file-text",
@@ -2971,6 +3072,31 @@ function timelineEventsForResident(resident: Resident) {
     });
   });
 
+  providerVisitsState.value.forEach((visit, index) => {
+    if (visit.residentId !== resident.id) {
+      return;
+    }
+    const summary = visit.textNote.trim() || visit.voiceTranscript.trim();
+    const sourceLabel = visitSourceLabel(visit);
+    const orderCount = visit.orderIds.length;
+    events.push({
+      id: `timeline-visit-${visit.id}`,
+      kind: "visit",
+      sourceId: visit.id,
+      timeAgo: visit.endedAt ?? visit.startedAt,
+      period: "Provider visit",
+      icon: "file-text",
+      title: `${visit.visitType} visit`,
+      text: `${visit.providerName} · ${sourceLabel}. ${summary ? timelineSummary(summary) : "Visit note in progress."}`,
+      interpretation: orderCount
+        ? `${visitOrderSummary(visit)} linked to this visit.`
+        : undefined,
+      status: providerVisitStatusLabel(visit.status),
+      tone: statusTone(visit.status),
+      sortOrder: timelineSortFromLabel(visit.endedAt ?? visit.startedAt, 345000 - index),
+    });
+  });
+
   clinicalOrders.value.forEach((order, index) => {
     if (order.residentId !== resident.id) {
       return;
@@ -2978,6 +3104,9 @@ function timelineEventsForResident(resident: Resident) {
     const eventTime = order.statusChangedAt ?? order.createdAt;
     events.push({
       id: `timeline-order-${order.id}`,
+      kind: "order",
+      sourceId: order.id,
+      threadId: order.linkedThreadId,
       timeAgo: eventTime,
       period: "Provider order",
       icon: "file-text",
@@ -2997,6 +3126,9 @@ function timelineEventsForResident(resident: Resident) {
     const eventTime = action.statusChangedAt ?? action.updatedAt ?? action.createdAt;
     events.push({
       id: `timeline-action-${action.id}`,
+      kind: "action",
+      sourceId: action.id,
+      threadId: action.linkedThreadId,
       timeAgo: eventTime,
       period: "Shared action",
       icon: action.status === "flagged" ? "alert-triangle" : "check-circle",
@@ -3017,6 +3149,9 @@ function timelineEventsForResident(resident: Resident) {
     }
     events.push({
       id: `timeline-escalation-${escalation.id}`,
+      kind: "escalation",
+      sourceId: escalation.id,
+      threadId: escalation.linkedThreadId,
       timeAgo: escalation.createdAt,
       period: "Escalation",
       icon: "alert-triangle",
@@ -3035,6 +3170,9 @@ function timelineEventsForResident(resident: Resident) {
     }
     events.push({
       id: `timeline-huddle-${huddle.id}`,
+      kind: "huddle",
+      sourceId: huddle.id,
+      threadId: huddle.threadId,
       timeAgo: huddle.createdAt,
       period: "Care huddle",
       icon: "users",
@@ -3053,6 +3191,8 @@ function timelineEventsForResident(resident: Resident) {
     }
     events.push({
       id: `timeline-followup-${followUp.id}`,
+      kind: "follow-up",
+      sourceId: followUp.id,
       timeAgo: followUp.createdAt,
       period: "Follow-up",
       icon: "clock",
@@ -3536,6 +3676,7 @@ function saveClinicalOrderDraft() {
     existingOrder.indication = scheduleDraft.value.indication.trim();
     existingOrder.details = scheduleDraft.value.orderDetails.trim();
     existingOrder.instructions = scheduleDraft.value.instructions.trim();
+    linkOrderToActiveVisit(existingOrder.id);
     return;
   }
 
@@ -3560,6 +3701,7 @@ function saveClinicalOrderDraft() {
   };
   order.linkedThreadId = createOrderContextThread(order);
   clinicalOrders.value = [order, ...clinicalOrders.value];
+  linkOrderToActiveVisit(order.id);
 }
 
 function saveScheduleDraft(startNow = false) {
@@ -3824,6 +3966,76 @@ function updateClinicalOrderFromScheduleItem(item: ResidentScheduleItem, status:
   if (order) {
     updateClinicalOrderStatus(order, status);
   }
+}
+
+function actionForTimelineEvent(event: ResidentTimelineEvent) {
+  return event.kind === "action" && event.sourceId
+    ? actionRequests.value.find((action) => action.id === event.sourceId) ?? null
+    : null;
+}
+
+function orderForTimelineEvent(event: ResidentTimelineEvent) {
+  return event.kind === "order" && event.sourceId
+    ? clinicalOrders.value.find((order) => order.id === event.sourceId) ?? null
+    : null;
+}
+
+function canManageTimelineAction(event: ResidentTimelineEvent) {
+  const action = actionForTimelineEvent(event);
+  return Boolean(
+    action &&
+      ((selectedRole.value === "provider" && action.assignedRole === "provider") ||
+        (selectedRole.value === "cna" && action.assignedRole === "cna")),
+  );
+}
+
+function timelineActionCompleteLabel(event: ResidentTimelineEvent) {
+  const action = actionForTimelineEvent(event);
+  return action ? actionCompleteLabel(action) : "Done";
+}
+
+function timelineActionFlagLabel(event: ResidentTimelineEvent) {
+  const action = actionForTimelineEvent(event);
+  return action ? actionFlagLabel(action) : "Flag";
+}
+
+function handleTimelineActionStatusSelection(event: ResidentTimelineEvent, status: ActionStatusUpdateTarget) {
+  const action = actionForTimelineEvent(event);
+  if (action) {
+    handleActionStatusSelection(action, status);
+  }
+}
+
+function timelineOrderStatus(event: ResidentTimelineEvent) {
+  return orderForTimelineEvent(event)?.status ?? "ordered";
+}
+
+function updateTimelineClinicalOrderStatus(event: ResidentTimelineEvent, status: ClinicalOrderStatus) {
+  const order = orderForTimelineEvent(event);
+  if (order) {
+    updateClinicalOrderStatus(order, status);
+  }
+}
+
+function openTimelineClinicalOrder(event: ResidentTimelineEvent) {
+  const order = orderForTimelineEvent(event);
+  if (order) {
+    openClinicalOrderDraft(order);
+  }
+}
+
+function openTimelineThread(event: ResidentTimelineEvent) {
+  if (event.threadId) {
+    openScheduleThread(event.threadId);
+  }
+}
+
+function timelineEventHasActions(event: ResidentTimelineEvent) {
+  return (
+    canManageTimelineAction(event) ||
+    event.kind === "order" ||
+    Boolean(event.threadId && event.kind !== "action")
+  );
 }
 
 function openScheduleItem(item: ResidentScheduleItem) {
@@ -4264,6 +4476,12 @@ function setView(view: ViewName) {
   editingClinicalOrderId.value = null;
   selectedScheduleDateKey.value = null;
   closeActionStatusModal();
+  if (view !== "provider-visit") {
+    stopVisitRecording();
+    clearVisitElapsedTimer();
+    activeVisitId.value = null;
+    visitStopConfirmOpen.value = false;
+  }
   activeView.value = view;
   selectedResidentId.value = null;
   if (!["messages", "provider-collaboration", "cna-messages"].includes(view)) {
@@ -4277,6 +4495,10 @@ function selectRole(role: RoleKey) {
   scheduleModalOpen.value = false;
   editingClinicalOrderId.value = null;
   selectedScheduleDateKey.value = null;
+  stopVisitRecording();
+  clearVisitElapsedTimer();
+  activeVisitId.value = null;
+  visitStopConfirmOpen.value = false;
   selectedRole.value = role;
   ensureLoginUserForRole(role);
   syncProfileFromLoginUser(role);
@@ -4297,6 +4519,8 @@ function login() {
   isAuthenticated.value = true;
   selectedFacility.value = defaultFacilityForRole(selectedRole.value);
   activeView.value = activeRole.value.defaultView;
+  activeVisitId.value = null;
+  visitStopConfirmOpen.value = false;
   selectedResidentId.value = null;
   selectedThreadId.value = null;
   threadMessages.value = [];
@@ -4331,6 +4555,12 @@ function openResident(residentOrId: Resident | string) {
 }
 
 function closeResident() {
+  if (activeView.value === "provider-visit") {
+    stopVisitRecording();
+    clearVisitElapsedTimer();
+    activeVisitId.value = null;
+    visitStopConfirmOpen.value = false;
+  }
   selectedResidentId.value = null;
 }
 
@@ -4540,6 +4770,176 @@ function clearCnaRecordingTimer() {
   if (cnaRecordingTimer) {
     window.clearInterval(cnaRecordingTimer);
     cnaRecordingTimer = null;
+  }
+}
+
+function clearVisitRecordingTimer() {
+  if (visitRecordingTimer) {
+    window.clearInterval(visitRecordingTimer);
+    visitRecordingTimer = null;
+  }
+}
+
+function clearVisitElapsedTimer() {
+  if (visitElapsedTimer) {
+    window.clearInterval(visitElapsedTimer);
+    visitElapsedTimer = null;
+  }
+}
+
+function syncVisitElapsed() {
+  const visit = activeProviderVisit.value;
+  visitElapsedSeconds.value = visit
+    ? Math.max(0, Math.floor((Date.now() - visit.startedAtMs) / 1000))
+    : 0;
+}
+
+function startVisitElapsedTimer() {
+  clearVisitElapsedTimer();
+  syncVisitElapsed();
+  visitElapsedTimer = window.setInterval(syncVisitElapsed, 1000);
+}
+
+function stopVisitRecording() {
+  const visit = activeProviderVisit.value;
+  if (!visit || !visitRecordingActive.value) {
+    return;
+  }
+
+  visitRecordingActive.value = false;
+  clearVisitRecordingTimer();
+  visitRecordingSeconds.value = Math.max(visitRecordingSeconds.value, 8);
+  visit.voiceTranscript = `${visit.residentName}: provider reviewed current trajectory, unresolved concerns, medication and monitoring needs, and care-team follow-up during this visit.`;
+}
+
+function startVisitRecording() {
+  if (!activeProviderVisit.value || visitRecordingActive.value) {
+    return;
+  }
+
+  visitRecordingActive.value = true;
+  visitRecordingSeconds.value = 0;
+  clearVisitRecordingTimer();
+  visitRecordingTimer = window.setInterval(() => {
+    visitRecordingSeconds.value += 1;
+  }, 1000);
+}
+
+function visitNoteSummary(visit: ProviderVisit) {
+  const source = visit.textNote.trim() || visit.voiceTranscript.trim();
+  return source ? timelineSummary(source, 140) : "Visit opened; note content not added yet.";
+}
+
+function visitSourceLabel(visit: ProviderVisit) {
+  const sources = [
+    visit.textNote.trim() ? "Text note" : "",
+    visit.voiceTranscript.trim() ? "Voice note" : "",
+  ].filter(Boolean);
+  return sources.length ? sources.join(" + ") : "No note captured";
+}
+
+function visitOrderSummary(visit: ProviderVisit) {
+  const count = visit.orderIds.length;
+  return count === 1 ? "1 order" : `${count} orders`;
+}
+
+function providerVisitStatusLabel(status: ProviderVisitStatus) {
+  return status.replace("-", " ");
+}
+
+function createProviderVisit(resident: Resident) {
+  const now = Date.now();
+  const visit: ProviderVisit = {
+    id: `visit-${now}`,
+    residentId: resident.id,
+    residentName: resident.name,
+    providerName: activeStaffUser.value.name,
+    visitType: selectedResidentOpportunity.value?.resident.id === resident.id ? "Acute" : "Follow-Up",
+    startedAt: currentTimeLabel(),
+    startedAtMs: now,
+    textNote: "",
+    voiceTranscript: "",
+    orderIds: [],
+    status: "in-progress",
+  };
+  providerVisitsState.value = [visit, ...providerVisitsState.value];
+  return visit;
+}
+
+function startVisitForResident(resident: Resident) {
+  stopVisitRecording();
+  profileMenuOpen.value = false;
+  selectedResidentId.value = resident.id;
+  residentTab.value = "notes";
+  residentChat.value = [...resident.talk];
+  workingCareSteps.value = { ...resident.careSteps };
+  const existingVisit = providerVisitsState.value.find(
+    (visit) => visit.residentId === resident.id && visit.status === "in-progress",
+  );
+  const visit = existingVisit ?? createProviderVisit(resident);
+  activeVisitId.value = visit.id;
+  activeView.value = "provider-visit";
+  visitNoteMode.value = "text";
+  visitStopConfirmOpen.value = false;
+  visitRecordingActive.value = false;
+  visitRecordingSeconds.value = 0;
+  startVisitElapsedTimer();
+  window.requestAnimationFrame(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  });
+}
+
+function addVisitNoteForSelectedResident() {
+  if (selectedResident.value) {
+    startVisitForResident(selectedResident.value);
+  }
+}
+
+function returnToResidentNotes() {
+  const resident = activeVisitResident.value;
+  stopVisitRecording();
+  clearVisitElapsedTimer();
+  activeVisitId.value = null;
+  visitStopConfirmOpen.value = false;
+  activeView.value = selectedRole.value === "provider" ? "provider-home" : activeRole.value.defaultView;
+  if (resident) {
+    openResident(resident);
+    residentTab.value = "notes";
+  }
+}
+
+function requestStopVisit() {
+  visitStopConfirmOpen.value = true;
+}
+
+function confirmStopVisit() {
+  const visit = activeProviderVisit.value;
+  if (!visit) {
+    visitStopConfirmOpen.value = false;
+    returnToResidentNotes();
+    return;
+  }
+
+  stopVisitRecording();
+  clearVisitElapsedTimer();
+  visit.status = "completed";
+  visit.endedAt = currentTimeLabel();
+  visitStopConfirmOpen.value = false;
+  returnToResidentNotes();
+}
+
+function linkOrderToActiveVisit(orderId: string) {
+  const visit = activeProviderVisit.value;
+  if (!visit || visit.orderIds.includes(orderId)) {
+    return;
+  }
+  visit.orderIds = [...visit.orderIds, orderId];
+}
+
+function openVisitOrder() {
+  const resident = activeVisitResident.value;
+  if (resident) {
+    openScheduleModal("clinical-order", resident);
   }
 }
 
@@ -4846,6 +5246,28 @@ function iconFor(name: string) {
   return iconMap[name] ?? Activity;
 }
 
+function firstVitalNumber(value: string) {
+  const match = value.replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+function vitalTrendDirection(vital: Resident["situation"]["vitals"][number]) {
+  const baseline = firstVitalNumber(vital.base);
+  const current = firstVitalNumber(vital.current);
+  if (baseline === null || current === null) {
+    return vital.isAbnormal ? "up" : "down";
+  }
+  return current >= baseline ? "up" : "down";
+}
+
+function vitalTrendIcon(vital: Resident["situation"]["vitals"][number]) {
+  return vitalTrendDirection(vital) === "down" ? ArrowDownRight : ArrowUpRight;
+}
+
+function vitalTrendLabel(vital: Resident["situation"]["vitals"][number]) {
+  return vitalTrendDirection(vital) === "down" ? "Falling from baseline" : "Rising from baseline";
+}
+
 function careUserIcon(user?: CareUser | null) {
   void user;
   return UserIcon;
@@ -5094,7 +5516,126 @@ function isSageNav(view: ViewName) {
         </div>
       </div>
 
-      <section v-if="selectedResident && workingCareSteps" class="screen detail-screen">
+      <section
+        v-if="activeView === 'provider-visit' && activeProviderVisit && activeVisitResident"
+        class="screen visit-screen"
+      >
+        <header class="screen-header detail-header visit-detail-header content-frame">
+          <button class="icon-button" type="button" aria-label="Back to visit notes" @click="returnToResidentNotes">
+            <ArrowLeft :size="19" />
+          </button>
+          <div class="title-stack">
+            <h1>Visit @{{ activeVisitResident.name }}</h1>
+            <p>{{ activeProviderVisit.visitType }} · Room {{ activeVisitResident.room }} · {{ residentFacility(activeVisitResident) }}</p>
+          </div>
+          <span class="chip compact">Time Lapsed {{ visitElapsedLabel }}</span>
+        </header>
+
+        <div class="visit-page content-frame">
+          <article class="panel visit-note-panel">
+            <div class="segmented-tabs visit-note-tabs">
+              <button
+                type="button"
+                :class="{ active: visitNoteMode === 'text' }"
+                @click="visitNoteMode = 'text'"
+              >
+                <FileText :size="15" />
+                Text Note
+              </button>
+              <button
+                type="button"
+                :class="{ active: visitNoteMode === 'voice' }"
+                @click="visitNoteMode = 'voice'"
+              >
+                <Mic :size="15" />
+                Voice Note
+              </button>
+            </div>
+
+          <label v-if="visitNoteMode === 'text'" class="visit-text-note">
+            <span class="section-label">Visit Narrative</span>
+            <textarea
+              v-model="activeProviderVisit.textNote"
+              rows="10"
+                placeholder="Document assessment, plan, and visit-specific context..."
+              />
+            </label>
+
+            <div v-else class="recording-station visit-recording" :class="{ active: visitRecordingActive }">
+              <div class="recording-copy">
+                <strong>{{ visitRecordingActive ? "Recording voice note" : "Voice note capture" }}</strong>
+                <span>
+                  {{ visitRecordingActive ? "Live transcription in progress" : "Tap record to capture visit dictation" }}
+                </span>
+              </div>
+              <button
+                type="button"
+                class="record-core"
+                :class="{ active: visitRecordingActive }"
+                :aria-label="visitRecordingActive ? 'Stop voice note recording' : 'Start voice note recording'"
+                @click="visitRecordingActive ? stopVisitRecording() : startVisitRecording()"
+              >
+                <span class="radio-waves" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <X v-if="visitRecordingActive" :size="30" />
+                <Mic v-else :size="32" />
+              </button>
+              <b class="recording-badge" :class="{ active: visitRecordingActive }">
+                {{ visitRecordingActive ? `REC ${visitRecordingSeconds}s` : "Ready" }}
+              </b>
+              <div v-if="visitRecordingActive || activeProviderVisit.voiceTranscript" class="transcript-preview">
+                <div class="section-label">
+                  {{ visitRecordingActive ? "Live Transcript" : "Generated Transcript" }}
+                </div>
+                <p>
+                  {{ visitRecordingActive ? "Listening for the provider visit note..." : activeProviderVisit.voiceTranscript }}
+                </p>
+              </div>
+            </div>
+          </article>
+
+          <article v-if="activeVisitOrders.length" class="panel visit-orders-panel">
+            <div class="notes-panel-header">
+              <div>
+                <div class="section-label">Visit Orders</div>
+                <h2>{{ activeVisitOrders.length }} order{{ activeVisitOrders.length === 1 ? "" : "s" }} from this visit</h2>
+              </div>
+            </div>
+            <div class="schedule-list compact-schedule-list">
+              <div v-for="order in activeVisitOrders" :key="order.id" class="schedule-row compact-schedule-row">
+                <button class="schedule-row-main" type="button" @click="openClinicalOrderDraft(order)">
+                  <span class="schedule-icon order">
+                    <FileText :size="17" />
+                  </span>
+                  <span>
+                    <strong>{{ order.orderType }} · {{ order.eventType }}</strong>
+                    <small>{{ order.details }} · {{ formatDateTimeLabel(order.requestedDate, order.requestedTime) }}</small>
+                  </span>
+                  <span class="chip compact" :class="statusTone(order.status)">
+                    {{ order.status.replaceAll("-", " ") }}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <div class="visit-action-bar">
+            <button class="danger-action" type="button" @click="requestStopVisit">
+              <X :size="16" />
+              Stop Visit
+            </button>
+            <button class="primary-action" type="button" @click="openVisitOrder">
+              <FileText :size="16" />
+              New Order
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section v-else-if="selectedResident && workingCareSteps" class="screen detail-screen">
         <header class="screen-header detail-header content-frame">
           <button class="icon-button" type="button" aria-label="Back" @click="closeResident">
             <ArrowLeft :size="19" />
@@ -5228,7 +5769,16 @@ function isSageNav(view: ViewName) {
                 {{ isSectionExpanded(residentSectionKey('prediction-evidence')) ? "Hide evidence" : "Show evidence" }}
               </button>
               <button
-                v-if="selectedResidentOpportunity && !actionForOpportunity(selectedResidentOpportunity)"
+                v-if="selectedRole === 'provider'"
+                class="primary-action compact-action"
+                type="button"
+                @click="startVisitForResident(selectedResident)"
+              >
+                <FileText :size="15" />
+                Start Visit
+              </button>
+              <button
+                v-else-if="selectedResidentOpportunity && !actionForOpportunity(selectedResidentOpportunity)"
                 class="primary-action compact-action"
                 type="button"
                 @click="openActionRequestFromOpportunity(selectedResidentOpportunity, 'Resident Prediction')"
@@ -5252,7 +5802,7 @@ function isSageNav(view: ViewName) {
                 @click="openOrderAction(selectedResident)"
               >
                 <FileText :size="15" />
-                {{ selectedRole === "provider" ? "New Order" : "Request Review" }}
+                Request Review
               </button>
             </div>
 
@@ -5288,224 +5838,64 @@ function isSageNav(view: ViewName) {
             </div>
           </article>
 
-          <article class="panel resident-context-tabs-panel">
-            <div class="resident-context-tabs" role="tablist" aria-label="Resident context">
-              <button
-                type="button"
-                :class="{ active: residentContextTab === 'updates' }"
-                @click="residentContextTab = 'updates'"
-              >
-                Care Updates
-                <span>{{ selectedResidentCareUpdates.length }}</span>
-              </button>
-              <button
-                type="button"
-                :class="{ active: residentContextTab === 'actions' }"
-                @click="residentContextTab = 'actions'"
-              >
-                Shared Actions
-                <span>{{ selectedResidentOpenActionCount }}</span>
-              </button>
-              <button
-                type="button"
-                :class="{ active: residentContextTab === 'orders' }"
-                @click="residentContextTab = 'orders'"
-              >
-                Orders & Follow-ups
-                <span>{{ selectedResidentScheduleItems.length }}</span>
-              </button>
-            </div>
-          </article>
-
-          <article v-if="residentContextTab === 'updates'" class="panel care-updates-panel resident-context-panel">
-            <div class="notes-panel-header">
-              <div>
-                <div class="section-label">Care Updates</div>
-                <h2>Shared resident context</h2>
+          <div
+            v-if="selectedResident.situation.concerns.length || selectedResident.situation.vitals.length"
+            class="resident-clinical-grid"
+          >
+            <article v-if="selectedResident.situation.concerns.length" class="panel concerns-panel">
+              <div class="notes-panel-header">
+                <div>
+                  <div class="section-label">Unresolved Concerns</div>
+                  <h2>Needs follow-up</h2>
+                </div>
+                <span class="chip compact">{{ selectedResident.situation.concerns.length }} concerns</span>
               </div>
-              <span class="chip compact">{{ selectedResidentCareUpdates.length }} updates</span>
-            </div>
-            <div v-if="selectedResidentCareUpdates.length" class="care-update-list">
-              <article
-                v-for="update in selectedResidentCareUpdates"
-                :key="update.id"
-                class="care-update-row"
-                :class="update.tone"
-              >
-                <span class="care-update-icon" :class="update.tone">
-                  <Mic v-if="update.kind === 'debrief'" :size="16" />
-                  <FileText v-else-if="update.kind === 'provider-note' || update.kind === 'order'" :size="16" />
-                  <AlertTriangle v-else-if="update.kind === 'escalation'" :size="16" />
-                  <Users v-else-if="update.kind === 'huddle'" :size="16" />
-                  <Clock v-else-if="update.kind === 'follow-up'" :size="16" />
-                  <CheckCircle v-else :size="16" />
-                </span>
-                <span>
-                  <small>{{ update.label }} · {{ update.meta }}</small>
-                  <strong>{{ update.title }}</strong>
-                  <p>{{ update.body }}</p>
-                </span>
-                <span class="chip compact" :class="statusTone(update.status)">
-                  {{ update.status }}
-                </span>
-              </article>
-            </div>
-            <p v-else class="empty-copy">
-              No shared care updates yet for this resident.
-            </p>
-          </article>
-
-          <article v-if="residentContextTab === 'actions'" class="panel action-panel resident-actions-panel resident-context-panel">
-            <div class="notes-panel-header">
-              <div>
-                <div class="section-label">Shared Actions</div>
-                <h2>Role follow-up</h2>
-              </div>
-              <span class="chip compact">{{ selectedResidentOpenActionCount }} active</span>
-            </div>
-            <div v-if="selectedResidentActions.length" class="action-list">
-              <div v-for="action in selectedResidentActions.slice(0, 4)" :key="action.id" class="action-row">
-                <span>
-                  <strong>{{ action.actionType }}</strong>
-                  <small>{{ actionAssigneeName(action) }} · {{ action.dueTime }} · {{ action.instructions }}</small>
-                </span>
-                <span class="chip compact" :class="statusTone(action.status)">
-                  {{ action.status.replace("-", " ") }}
-                </span>
+              <div class="situation-concern-list">
                 <div
-                  v-if="(selectedRole === 'provider' && action.assignedRole === 'provider') || (selectedRole === 'cna' && action.assignedRole === 'cna')"
-                  class="action-row-controls"
+                  v-for="concern in selectedResident.situation.concerns"
+                  :key="concern.title"
+                  class="concern-row"
                 >
-                  <button class="soft-action compact-action" type="button" @click="handleActionStatusSelection(action, 'completed')">
-                    <Check :size="14" />
-                    {{ actionCompleteLabel(action) }}
-                  </button>
-                  <button class="soft-action compact-action" type="button" @click="handleActionStatusSelection(action, 'flagged')">
-                    <AlertTriangle :size="14" />
-                    {{ actionFlagLabel(action) }}
-                  </button>
+                  <span class="dot" :class="concernTone(concern.color)" />
+                  <span>{{ concern.title }}</span>
+                  <span class="chip compact" :class="statusTone(concern.status)">
+                    {{ concern.status }}
+                  </span>
                 </div>
               </div>
-            </div>
-            <p v-else class="empty-copy">
-              No shared actions assigned for this resident yet.
-            </p>
-          </article>
+            </article>
 
-          <article v-if="residentContextTab === 'orders'" class="panel action-panel orders-followups-panel resident-context-panel">
-            <div class="notes-panel-header">
-              <div>
-                <div class="section-label">Orders & Follow-ups</div>
-                <h2>Scheduled clinical work</h2>
+            <article v-if="selectedResident.situation.vitals.length" class="panel vitals-panel">
+              <div class="notes-panel-header">
+                <div>
+                  <div class="section-label">Vitals</div>
+                  <h2>Trajectory vs baseline</h2>
+                </div>
+                <span class="chip compact">{{ selectedResident.situation.vitals.length }} vitals</span>
               </div>
-              <div class="section-header-actions">
-                <button class="soft-action compact-action" type="button" @click="openOrderAction(selectedResident)">
-                  <FileText :size="14" />
-                  {{ selectedRole === "provider" ? "New Order" : "Request Review" }}
-                </button>
-                <span class="chip compact">{{ selectedResidentScheduleItems.length }} items</span>
-              </div>
-            </div>
-            <div v-if="selectedResidentScheduleItems.length" class="schedule-list compact-schedule-list">
-              <div
-                v-for="item in selectedResidentScheduleItems.slice(0, 6)"
-                :key="`${item.kind}-${item.id}`"
-                class="schedule-row compact-schedule-row"
-              >
-                <button class="schedule-row-main" type="button" @click="openScheduleItem(item)">
-                  <span class="schedule-icon" :class="item.kind">
-                    <Users v-if="item.kind === 'huddle'" :size="17" />
-                    <AlertTriangle v-else-if="item.kind === 'escalation'" :size="17" />
-                    <FileText v-else-if="item.kind === 'order'" :size="17" />
-                    <Clock v-else-if="item.kind === 'follow-up'" :size="17" />
-                    <CheckCircle v-else :size="17" />
-                  </span>
-                  <span>
-                    <strong>{{ item.title }}</strong>
-                    <small>{{ item.time }} · {{ item.detail }}</small>
-                  </span>
-                  <span class="chip compact" :class="scheduleItemTone(item)">
-                    {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
-                  </span>
-                </button>
-                <button
-                  v-if="item.threadId && item.kind !== 'order'"
-                  class="soft-icon schedule-message-action"
-                  type="button"
-                  aria-label="Open linked thread"
-                  @click="openScheduleThread(item.threadId)"
+              <div class="vital-list">
+                <div
+                  v-for="vital in selectedResident.situation.vitals"
+                  :key="vital.label"
+                  class="vital-row"
                 >
-                  <MessageCircle :size="15" />
-                  <span>Message</span>
-                </button>
-                <div v-if="item.kind === 'order'" class="schedule-order-actions">
-                  <button
-                    v-if="selectedRole === 'provider'"
-                    class="soft-action compact-action"
-                    type="button"
-                    @click="openClinicalOrderFromScheduleItem(item)"
+                  <component :is="iconFor(vital.icon)" :size="18" />
+                  <span>{{ vital.label }}</span>
+                  <small>Base {{ vital.base }}</small>
+                  <span
+                    class="vital-trend-arrow"
+                    :class="vitalTrendDirection(vital)"
+                    :aria-label="vitalTrendLabel(vital)"
                   >
-                    <FileText :size="14" />
-                    Edit
-                  </button>
-                  <button
-                    v-if="item.threadId"
-                    class="soft-action compact-action"
-                    type="button"
-                    @click="openScheduleThread(item.threadId)"
-                  >
-                    <MessageCircle :size="14" />
-                    Message
-                  </button>
-                  <button
-                    class="soft-action compact-action"
-                    type="button"
-                    :disabled="orderStatusForScheduleItem(item) === 'completed'"
-                    @click="updateClinicalOrderFromScheduleItem(item, 'completed')"
-                  >
-                    <Check :size="14" />
-                    Complete
-                  </button>
-                  <button
-                    class="soft-action compact-action"
-                    type="button"
-                    :disabled="orderStatusForScheduleItem(item) === 'flagged'"
-                    @click="updateClinicalOrderFromScheduleItem(item, 'flagged')"
-                  >
-                    <AlertTriangle :size="14" />
-                    Flag
-                  </button>
+                    <component :is="vitalTrendIcon(vital)" :size="15" />
+                  </span>
+                  <strong :class="{ abnormal: vital.isAbnormal, critical: vital.isCritical }">
+                    {{ vital.current }}
+                  </strong>
                 </div>
               </div>
-            </div>
-            <p v-else class="empty-copy">
-              No orders, huddles, or follow-ups scheduled for this resident yet.
-            </p>
-          </article>
-
-          <article v-if="selectedResident.situation.vitals.length" class="panel vitals-panel">
-            <div class="notes-panel-header">
-              <div>
-                <div class="section-label">Vitals</div>
-                <h2>Trajectory vs baseline</h2>
-              </div>
-              <span class="chip compact">{{ selectedResident.situation.vitals.length }} vitals</span>
-            </div>
-            <div class="vital-list">
-              <div
-                v-for="vital in selectedResident.situation.vitals"
-                :key="vital.label"
-                class="vital-row"
-              >
-                <component :is="iconFor(vital.icon)" :size="18" />
-                <span>{{ vital.label }}</span>
-                <small>Base {{ vital.base }}</small>
-                <strong :class="{ abnormal: vital.isAbnormal, critical: vital.isCritical }">
-                  {{ vital.current }}
-                </strong>
-              </div>
-            </div>
-          </article>
+            </article>
+          </div>
 
           <article v-if="selectedResident.situation.clarify.length" class="panel clarify-panel">
             <div class="section-label">Clarify</div>
@@ -5560,126 +5950,51 @@ function isSageNav(view: ViewName) {
 
         <div v-else-if="residentTab === 'notes'" class="resident-notes-screen content-frame">
           <div class="notes-layout provider-notes-layout">
-            <section class="panel notes-list-panel">
-              <div class="notes-panel-header">
+            <section class="panel notes-list-panel visit-list-panel">
+              <div class="notes-panel-header visit-list-header">
                 <div>
-                  <div class="section-label">Provider Notes</div>
+                  <div class="section-label">Visit Notes</div>
                   <h2>{{ selectedResident.name }}</h2>
                 </div>
-                <span class="chip compact">{{ selectedResidentNotes.length }} notes</span>
-              </div>
-
-              <div class="recording-station" :class="{ active: providerRecordingActive }">
-                <div class="recording-copy">
-                  <strong>{{ providerRecordingActive ? "Recording provider note" : "Voice note capture" }}</strong>
-                  <span>
-                    {{ providerRecordingActive ? "Live transcription in progress" : "Tap the center button to capture a provider observation" }}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  class="record-core"
-                  :class="{ active: providerRecordingActive }"
-                  :aria-label="providerRecordingActive ? 'Stop recording' : 'Start provider note recording'"
-                  @click="providerRecordingActive ? stopProviderRecording() : startProviderRecording()"
-                >
-                  <span class="radio-waves" aria-hidden="true">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                  <X v-if="providerRecordingActive" :size="30" />
-                  <Mic v-else :size="32" />
+                <button class="primary-action compact-action" type="button" @click="addVisitNoteForSelectedResident">
+                  <FileText :size="15" />
+                  Add Visit Note
                 </button>
-                <b class="recording-badge" :class="{ active: providerRecordingActive }">
-                  {{ providerRecordingActive ? `REC ${providerRecordingSeconds}s` : "Ready" }}
-                </b>
-                <div v-if="providerRecordingActive || providerTranscript" class="transcript-preview">
-                  <div class="section-label">
-                    {{ providerRecordingActive ? "Live Transcript" : "Generated Transcript" }}
-                  </div>
-                  <p>
-                    {{ providerRecordingActive ? "Listening for the provider note..." : providerTranscript }}
-                  </p>
-                </div>
               </div>
 
-              <div class="note-card-list provider-note-accordion-list">
+              <div v-if="selectedResidentVisits.length" class="visit-card-list">
                 <article
-                  v-for="note in selectedResidentNotes"
-                  :key="note.id"
-                  class="note-card provider-note-accordion"
-                  :class="{ selected: expandedProviderNoteId === note.id }"
+                  v-for="visit in selectedResidentVisits"
+                  :key="visit.id"
+                  class="visit-card"
                 >
-                  <button
-                    class="note-card-main provider-note-accordion-header"
-                    type="button"
-                    :aria-expanded="expandedProviderNoteId === note.id"
-                    @click="toggleProviderNote(note.id)"
-                  >
+                  <div class="visit-card-head">
                     <span>
-                      <strong>{{ note.title }}</strong>
-                      <small>{{ providerNoteSourceLabel(note.source) }} · {{ note.createdAt }}</small>
-                      <span v-if="note.source === 'voice'" class="recorded-pill">
-                        <Mic :size="12" />
-                        Recorded note
-                      </span>
+                      <strong>{{ visit.visitType }} visit</strong>
+                      <small>{{ visit.providerName }} · {{ visit.startedAt }}{{ visit.endedAt ? ` - ${visit.endedAt}` : "" }}</small>
                     </span>
-                    <span class="chip compact" :class="statusTone(note.status)">
-                      {{ note.status.replaceAll("-", " ") }}
+                    <span class="chip compact" :class="statusTone(visit.status)">
+                      {{ providerVisitStatusLabel(visit.status) }}
                     </span>
-                    <ChevronUp v-if="expandedProviderNoteId === note.id" :size="16" />
-                    <ChevronDown v-else :size="16" />
-                  </button>
-                  <div v-if="expandedProviderNoteId === note.id" class="provider-note-accordion-body">
-                    <div class="section-label">
-                      {{ note.source === "voice" ? "Transcription" : "Note Body" }}
-                    </div>
-                    <p class="body-copy">{{ note.body }}</p>
-                    <div v-if="note.encounterDraft" class="delegate-summary">
-                      <span><strong>Encounter:</strong> {{ note.encounterDraft.visitType }} draft for Otangeles Notes+</span>
-                      <span><strong>Notes:</strong> {{ note.encounterDraft.body }}</span>
-                    </div>
-                    <div class="provider-note-actions">
-                      <button class="primary-action compact-action" type="button" @click="openEncounterModal(note)">
-                        <FileText :size="15" />
-                        Create an Encounter
-                      </button>
-                      <button class="danger-action compact-action" type="button" @click="openDeleteProviderNoteModal(note)">
-                        <X :size="15" />
-                        Delete
-                      </button>
-                    </div>
+                  </div>
+                  <p>{{ visitNoteSummary(visit) }}</p>
+                  <div class="visit-card-meta">
+                    <span>{{ visitSourceLabel(visit) }}</span>
+                    <span>{{ visitOrderSummary(visit) }}</span>
                   </div>
                 </article>
-                <p v-if="selectedResidentNotes.length === 0" class="empty-copy">
-                  No provider notes yet for this resident.
-                </p>
               </div>
+              <p v-else class="empty-copy">
+                No visits documented for this resident yet.
+              </p>
             </section>
           </div>
-
-          <form class="composer" @submit.prevent="saveTypedProviderNote">
-            <input v-model="providerNoteDraft" type="text" placeholder="Type provider note for this resident..." />
-            <button
-              type="button"
-              class="icon-button"
-              :aria-label="providerRecordingActive ? 'Stop recording' : 'Record provider note'"
-              @click="providerRecordingActive ? stopProviderRecording() : startProviderRecording()"
-            >
-              <X v-if="providerRecordingActive" :size="17" />
-              <Mic v-else :size="17" />
-            </button>
-            <button class="send-button" type="submit" aria-label="Save provider note">
-              <Send :size="17" />
-            </button>
-          </form>
         </div>
 
         <div v-else class="timeline-list content-frame">
           <div class="timeline-list-header">
             <div>
-              <div class="section-label">Timeline</div>
+              <div class="section-label">Patient Timeline</div>
               <h2>What happened for {{ selectedResident.name }}</h2>
             </div>
             <span class="chip compact">{{ selectedResidentTimelineEvents.length }} events</span>
@@ -5706,6 +6021,73 @@ function isSageNav(view: ViewName) {
                   <strong>Sage:</strong>
                   <span>{{ event.interpretation }}</span>
                 </div>
+                <div v-if="timelineEventHasActions(event)" class="timeline-card-actions">
+                  <template v-if="canManageTimelineAction(event)">
+                    <button
+                      class="soft-action compact-action"
+                      type="button"
+                      @click="handleTimelineActionStatusSelection(event, 'completed')"
+                    >
+                      <Check :size="14" />
+                      {{ timelineActionCompleteLabel(event) }}
+                    </button>
+                    <button
+                      class="soft-action compact-action"
+                      type="button"
+                      @click="handleTimelineActionStatusSelection(event, 'flagged')"
+                    >
+                      <AlertTriangle :size="14" />
+                      {{ timelineActionFlagLabel(event) }}
+                    </button>
+                  </template>
+                  <template v-if="event.kind === 'order'">
+                    <button
+                      v-if="selectedRole === 'provider'"
+                      class="soft-action compact-action"
+                      type="button"
+                      @click="openTimelineClinicalOrder(event)"
+                    >
+                      <FileText :size="14" />
+                      Edit
+                    </button>
+                    <button
+                      v-if="event.threadId"
+                      class="soft-action compact-action"
+                      type="button"
+                      @click="openTimelineThread(event)"
+                    >
+                      <MessageCircle :size="14" />
+                      Message
+                    </button>
+                    <button
+                      class="soft-action compact-action"
+                      type="button"
+                      :disabled="timelineOrderStatus(event) === 'completed'"
+                      @click="updateTimelineClinicalOrderStatus(event, 'completed')"
+                    >
+                      <Check :size="14" />
+                      Complete
+                    </button>
+                    <button
+                      class="soft-action compact-action"
+                      type="button"
+                      :disabled="timelineOrderStatus(event) === 'flagged'"
+                      @click="updateTimelineClinicalOrderStatus(event, 'flagged')"
+                    >
+                      <AlertTriangle :size="14" />
+                      Flag
+                    </button>
+                  </template>
+                  <button
+                    v-if="event.threadId && event.kind !== 'action' && event.kind !== 'order'"
+                    class="soft-action compact-action"
+                    type="button"
+                    @click="openTimelineThread(event)"
+                  >
+                    <MessageCircle :size="14" />
+                    Message
+                  </button>
+                </div>
               </div>
             </div>
           </article>
@@ -5725,7 +6107,7 @@ function isSageNav(view: ViewName) {
         </header>
 
         <section class="situation-accordion-list content-frame">
-          <article class="situation-accordion panel" :class="{ open: openSituationAccordion === 'facility-focus' }">
+          <article v-if="false" class="situation-accordion panel" :class="{ open: openSituationAccordion === 'facility-focus' }">
             <button
               class="situation-accordion-header"
               type="button"
@@ -5780,7 +6162,7 @@ function isSageNav(view: ViewName) {
             </p>
           </article>
 
-          <article class="situation-accordion panel" :class="{ open: openSituationAccordion === 'requested-actions' }">
+          <article v-if="false" class="situation-accordion panel" :class="{ open: openSituationAccordion === 'requested-actions' }">
           <button
             class="situation-accordion-header"
             type="button"
@@ -5828,7 +6210,7 @@ function isSageNav(view: ViewName) {
             </p>
           </article>
 
-          <article class="situation-accordion panel" :class="{ open: openSituationAccordion === 'facility-intelligence' }">
+          <article v-if="false" class="situation-accordion panel" :class="{ open: openSituationAccordion === 'facility-intelligence' }">
           <button
             class="situation-accordion-header"
             type="button"
@@ -5865,9 +6247,9 @@ function isSageNav(view: ViewName) {
                       <span
                         v-if="summary.topOpportunity"
                         class="chip compact facility-intelligence-status-chip"
-                        :class="statusTone(opportunityActionStatusLabel(summary.topOpportunity))"
+                        :class="statusTone(opportunityActionStatusLabel(summary.topOpportunity!))"
                       >
-                        {{ opportunityActionStatusLabel(summary.topOpportunity) }}
+                        {{ opportunityActionStatusLabel(summary.topOpportunity!) }}
                       </span>
                     </span>
                   </div>
@@ -5891,8 +6273,8 @@ function isSageNav(view: ViewName) {
                   </div>
                   <div v-if="summary.topOpportunity" class="facility-intelligence-top-resident">
                     <small>Top resident</small>
-                    <strong>{{ summary.topOpportunity.resident.name }}</strong>
-                    <p>{{ summary.topOpportunity.reason }}</p>
+                    <strong>{{ summary.topOpportunity!.resident.name }}</strong>
+                    <p>{{ summary.topOpportunity!.reason }}</p>
                   </div>
                   <div class="facility-intelligence-source-grid">
                     <span>
@@ -5915,10 +6297,10 @@ function isSageNav(view: ViewName) {
                 </div>
                 <div v-if="summary.topOpportunity" class="action-row-controls facility-intelligence-actions">
                   <button
-                    v-if="!actionForOpportunity(summary.topOpportunity)"
+                    v-if="!actionForOpportunity(summary.topOpportunity!)"
                     class="primary-action compact-action"
                     type="button"
-                    @click="openActionRequestFromOpportunity(summary.topOpportunity, 'DON Facility Intelligence')"
+                    @click="openActionRequestFromOpportunity(summary.topOpportunity!, 'DON Facility Intelligence')"
                   >
                     <Send :size="14" />
                     Assign immediate action
@@ -5927,12 +6309,12 @@ function isSageNav(view: ViewName) {
                     v-else
                     class="soft-action compact-action"
                     type="button"
-                    @click="reviewOpportunityAction(summary.topOpportunity)"
+                    @click="reviewOpportunityAction(summary.topOpportunity!)"
                   >
                     <FileText :size="14" />
                     Review action
                   </button>
-                  <button class="soft-action compact-action" type="button" @click="openResident(summary.topOpportunity.resident)">
+                  <button class="soft-action compact-action" type="button" @click="openResident(summary.topOpportunity!.resident)">
                     <FileText :size="14" />
                     Review top resident
                   </button>
@@ -5944,25 +6326,16 @@ function isSageNav(view: ViewName) {
             </p>
           </article>
 
-          <article class="situation-accordion panel" :class="{ open: openSituationAccordion === 'current-watches' }">
-          <button
-            class="situation-accordion-header"
-            type="button"
-            :aria-expanded="openSituationAccordion === 'current-watches'"
-            @click="setSituationAccordion('current-watches')"
-          >
-            <span>
-              <strong>Current Watches</strong>
-              <small>{{ filteredPriorityResidents.length }} residents with active watch context</small>
-            </span>
-            <span class="accordion-header-side">
+          <article class="panel current-watches-panel">
+            <div class="notes-panel-header current-watches-header">
+              <div>
+                <div class="section-label">Current Watches</div>
+                <h2>{{ filteredPriorityResidents.length }} residents with active watch context</h2>
+              </div>
               <span class="chip compact">{{ filteredPriorityResidents.length }} watches</span>
-              <ChevronUp v-if="openSituationAccordion === 'current-watches'" :size="17" />
-              <ChevronDown v-else :size="17" />
-            </span>
-          </button>
+            </div>
 
-        <div v-if="openSituationAccordion === 'current-watches'" class="situation-layout situation-accordion-body">
+        <div class="situation-layout current-watches-body">
           <div class="priority-list">
             <article
               v-for="resident in filteredPriorityResidents"
@@ -5986,14 +6359,50 @@ function isSageNav(view: ViewName) {
                   <strong>{{ resident.latest }}</strong>
                 </div>
                 <p>{{ resident.situation.summary }}</p>
-                <div class="mini-vitals">
-                  <span
-                    v-for="vital in resident.situation.vitals.slice(0, 3)"
-                    :key="vital.label"
-                    :class="{ abnormal: vital.isAbnormal }"
-                  >
-                    {{ vital.label }} {{ vital.current }}
-                  </span>
+                <div
+                  v-if="resident.situation.concerns.length || resident.situation.vitals.length"
+                  class="situation-clinical-stack"
+                >
+                  <section v-if="resident.situation.concerns.length" class="watch-context-card">
+                    <div class="section-label">Unresolved Concerns</div>
+                    <div class="situation-concern-list compact-context-list">
+                      <div
+                        v-for="concern in resident.situation.concerns.slice(0, 3)"
+                        :key="concern.title"
+                        class="concern-row"
+                      >
+                        <span class="dot" :class="concernTone(concern.color)" />
+                        <span>{{ concern.title }}</span>
+                        <span class="chip compact" :class="statusTone(concern.status)">
+                          {{ concern.status }}
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+                  <section v-if="resident.situation.vitals.length" class="watch-context-card">
+                    <div class="section-label">Vitals</div>
+                    <div class="vital-list watch-vital-list">
+                      <div
+                        v-for="vital in resident.situation.vitals"
+                        :key="vital.label"
+                        class="vital-row compact-vital-row"
+                      >
+                        <component :is="iconFor(vital.icon)" :size="17" />
+                        <span>{{ vital.label }}</span>
+                        <small>Base {{ vital.base }}</small>
+                        <span
+                          class="vital-trend-arrow"
+                          :class="vitalTrendDirection(vital)"
+                          :aria-label="vitalTrendLabel(vital)"
+                        >
+                          <component :is="vitalTrendIcon(vital)" :size="15" />
+                        </span>
+                        <strong :class="{ abnormal: vital.isAbnormal, critical: vital.isCritical }">
+                          {{ vital.current }}
+                        </strong>
+                      </div>
+                    </div>
+                  </section>
                 </div>
                 <button type="button" class="primary-action compact-action" @click="openResident(resident)">
                   <FileText :size="15" />
@@ -6025,28 +6434,50 @@ function isSageNav(view: ViewName) {
               <strong>{{ activeSituationResident.latest }}</strong>
             </div>
             <p class="body-copy">{{ activeSituationResident.situation.summary }}</p>
-            <div class="mini-vitals">
-              <span
-                v-for="vital in activeSituationResident.situation.vitals.slice(0, 4)"
-                :key="vital.label"
-                :class="{ abnormal: vital.isAbnormal }"
-              >
-                {{ vital.label }} {{ vital.current }}
-              </span>
-            </div>
-            <div v-if="activeSituationResident.situation.concerns.length" class="situation-concern-list">
-              <div class="section-label">Unresolved Concerns</div>
-              <div
-                v-for="concern in activeSituationResident.situation.concerns.slice(0, 3)"
-                :key="concern.title"
-                class="concern-row"
-              >
-                <span class="dot" :class="concernTone(concern.color)" />
-                <span>{{ concern.title }}</span>
-                <span class="chip compact" :class="statusTone(concern.status)">
-                  {{ concern.status }}
-                </span>
-              </div>
+            <div
+              v-if="activeSituationResident.situation.concerns.length || activeSituationResident.situation.vitals.length"
+              class="situation-clinical-stack"
+            >
+              <section v-if="activeSituationResident.situation.concerns.length" class="watch-context-card">
+                <div class="section-label">Unresolved Concerns</div>
+                <div class="situation-concern-list compact-context-list">
+                  <div
+                    v-for="concern in activeSituationResident.situation.concerns.slice(0, 3)"
+                    :key="concern.title"
+                    class="concern-row"
+                  >
+                    <span class="dot" :class="concernTone(concern.color)" />
+                    <span>{{ concern.title }}</span>
+                    <span class="chip compact" :class="statusTone(concern.status)">
+                      {{ concern.status }}
+                    </span>
+                  </div>
+                </div>
+              </section>
+              <section v-if="activeSituationResident.situation.vitals.length" class="watch-context-card">
+                <div class="section-label">Vitals</div>
+                <div class="vital-list watch-vital-list">
+                  <div
+                    v-for="vital in activeSituationResident.situation.vitals"
+                    :key="vital.label"
+                    class="vital-row compact-vital-row"
+                  >
+                    <component :is="iconFor(vital.icon)" :size="17" />
+                    <span>{{ vital.label }}</span>
+                    <small>Base {{ vital.base }}</small>
+                    <span
+                      class="vital-trend-arrow"
+                      :class="vitalTrendDirection(vital)"
+                      :aria-label="vitalTrendLabel(vital)"
+                    >
+                      <component :is="vitalTrendIcon(vital)" :size="15" />
+                    </span>
+                    <strong :class="{ abnormal: vital.isAbnormal, critical: vital.isCritical }">
+                      {{ vital.current }}
+                    </strong>
+                  </div>
+                </div>
+              </section>
             </div>
             <div class="context-stats">
               <span>
@@ -6329,7 +6760,109 @@ function isSageNav(view: ViewName) {
 
         <div class="role-workspace provider-home-workspace">
           <div class="role-main provider-home-main">
-            <section class="situation-accordion-list provider-home-accordion-list">
+            <section class="content-frame provider-daily-visit-list">
+              <article class="panel clinical-attention-panel">
+                <div class="notes-panel-header">
+                  <div>
+                    <div class="section-label">Daily Visit List</div>
+                    <h2>Residents to see today</h2>
+                  </div>
+                  <span class="chip compact">{{ filteredProviderOpportunities.length }} residents</span>
+                </div>
+
+                <div v-if="filteredProviderOpportunities.length" class="attention-list daily-visit-cards">
+                  <article
+                    v-for="opportunity in filteredProviderOpportunities"
+                    :key="opportunity.id"
+                    class="attention-card daily-visit-card"
+                  >
+                    <div class="attention-head">
+                      <img class="avatar" :src="opportunity.resident.image" :alt="opportunity.resident.name" />
+                      <div class="attention-head-copy">
+                        <div class="attention-title-row">
+                          <strong>{{ opportunity.resident.name }}</strong>
+                        </div>
+                        <small>{{ opportunity.facility }} · Room {{ opportunity.resident.room }}</small>
+                      </div>
+                    </div>
+                    <div class="chip-row daily-visit-status">
+                      <span
+                        v-for="chip in opportunity.resident.statusChips.slice(0, 2)"
+                        :key="chip"
+                        class="chip compact"
+                        :class="statusTone(chip)"
+                      >
+                        {{ chip }}
+                      </span>
+                      <span class="chip compact" :class="statusTone(opportunity.resident.acuity)">
+                        {{ opportunity.resident.acuity }}
+                      </span>
+                    </div>
+                    <p>{{ opportunity.resident.situation.summary }}</p>
+                    <div class="delegate-summary daily-visit-next">
+                      <span><strong>What to do next:</strong> {{ opportunity.recommendedAction }}</span>
+                    </div>
+                    <div class="daily-visit-context-grid">
+                      <section v-if="opportunity.resident.situation.concerns.length" class="daily-visit-context-card">
+                        <div class="section-label">Unresolved Concerns</div>
+                        <div class="situation-concern-list compact-context-list">
+                          <div
+                            v-for="concern in opportunity.resident.situation.concerns.slice(0, 2)"
+                            :key="concern.title"
+                            class="concern-row"
+                          >
+                            <span class="dot" :class="concernTone(concern.color)" />
+                            <span>{{ concern.title }}</span>
+                            <span class="chip compact" :class="statusTone(concern.status)">
+                              {{ concern.status }}
+                            </span>
+                          </div>
+                        </div>
+                      </section>
+                      <section v-if="opportunity.resident.situation.vitals.length" class="daily-visit-context-card">
+                        <div class="section-label">Vitals</div>
+                        <div class="vital-list watch-vital-list">
+                          <div
+                            v-for="vital in opportunity.resident.situation.vitals.slice(0, 3)"
+                            :key="vital.label"
+                            class="vital-row compact-vital-row"
+                          >
+                            <component :is="iconFor(vital.icon)" :size="17" />
+                            <span>{{ vital.label }}</span>
+                            <small>Base {{ vital.base }}</small>
+                            <span
+                              class="vital-trend-arrow"
+                              :class="vitalTrendDirection(vital)"
+                              :aria-label="vitalTrendLabel(vital)"
+                            >
+                              <component :is="vitalTrendIcon(vital)" :size="15" />
+                            </span>
+                            <strong :class="{ abnormal: vital.isAbnormal, critical: vital.isCritical }">
+                              {{ vital.current }}
+                            </strong>
+                          </div>
+                        </div>
+                      </section>
+                    </div>
+                    <div class="card-actions clinical-attention-actions">
+                      <button
+                        class="primary-action compact-action clinical-attention-primary-action"
+                        type="button"
+                        @click="startVisitForResident(opportunity.resident)"
+                      >
+                        <FileText :size="15" />
+                        Start Visit
+                      </button>
+                    </div>
+                  </article>
+                </div>
+                <p v-else class="empty-copy">
+                  No residents need a provider visit for this facility right now.
+                </p>
+              </article>
+            </section>
+
+            <section v-if="false" class="situation-accordion-list provider-home-accordion-list">
               <article class="situation-accordion panel" :class="{ open: openProviderHomeAccordion === 'review-decide' }">
                 <button
                   class="situation-accordion-header"
@@ -6449,8 +6982,8 @@ function isSageNav(view: ViewName) {
                         </div>
                         <div v-if="summary.topOpportunity" class="facility-intelligence-top-resident">
                           <small>Top resident</small>
-                          <strong>{{ summary.topOpportunity.resident.name }}</strong>
-                          <p>{{ summary.topOpportunity.category }} · {{ summary.topOpportunity.reason }}</p>
+                          <strong>{{ summary.topOpportunity!.resident.name }}</strong>
+                          <p>{{ summary.topOpportunity!.category }} · {{ summary.topOpportunity!.reason }}</p>
                         </div>
                         <div class="facility-intelligence-source-grid">
                           <span>
@@ -6640,7 +7173,7 @@ function isSageNav(view: ViewName) {
             </section>
           </div>
 
-          <aside class="role-side provider-home-side">
+          <aside v-if="false" class="role-side provider-home-side">
             <article class="panel provider-side-panel">
               <div class="notes-panel-header">
                 <div>
@@ -8613,6 +9146,23 @@ function isSageNav(view: ViewName) {
             <strong>No events yet</strong>
             <small>Add a huddle, follow-up, or clinical order for this date.</small>
           </span>
+        </div>
+      </article>
+    </div>
+
+    <div v-if="visitStopConfirmOpen && activeProviderVisit" class="modal-backdrop" @click="visitStopConfirmOpen = false">
+      <article class="modal-card" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="visitStopConfirmOpen = false">
+          <X :size="18" />
+        </button>
+        <h2>Stop visit?</h2>
+        <p>This will save the current visit note for {{ activeProviderVisit.residentName }} and return to Visit Notes.</p>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="visitStopConfirmOpen = false">Cancel</button>
+          <button class="danger-action" type="button" @click="confirmStopVisit">
+            <X :size="16" />
+            Stop Visit
+          </button>
         </div>
       </article>
     </div>
