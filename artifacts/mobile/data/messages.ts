@@ -26,11 +26,22 @@ export interface ThreadMessage {
   duration?: string;
 }
 
+export type ThreadPurpose =
+  | "resident-room"
+  | "direct"
+  | "staff-group"
+  | "huddle-event"
+  | "order"
+  | "escalation"
+  | "action";
+
 export interface Thread {
   id: string;
   kind: "dm" | "huddle";
   title: string;
   members: string[];
+  residentId?: string;
+  purpose?: ThreadPurpose;
   image?: string;
   lastMessage: string;
   lastTs: string;
@@ -260,66 +271,76 @@ export const threads: Thread[] = [
   {
     id: "t1",
     kind: "huddle",
-    title: "Day Shift · 2 East",
-    members: ["me", "u1", "u2", "u3", "u4"],
-    lastMessage: "Sarah: All vitals captured for @Mary Lou. Starting reassessment now.",
+    title: "Mary Lou Smith Care Team",
+    members: ["u8", "u1", "u2", "u3", "u4"],
+    residentId: "1",
+    purpose: "resident-room",
+    lastMessage: "Dr. Hannah: Approved — start IV antibiotics. I'll round at 10.",
     lastTs: "2m",
     unread: 3,
     messages: [
-      { id: "m1", authorId: "u4", text: "Morning team — let's prioritize 204B today.", ts: "8:02 AM" },
+      { id: "m1", authorId: "u8", text: "Mary Lou is our priority resident this morning. Please keep updates here so everyone has the same picture.", ts: "8:02 AM" },
       { id: "m2", authorId: "u1", text: "On it. @Mary Lou flagged DECLINING overnight, getting fresh vitals.", ts: "8:04 AM" },
       { id: "m3", authorId: "u2", text: "I'll cover @Walter Jefferson's post-fall checks.", ts: "8:06 AM" },
-      { id: "m4", authorId: "u4", text: "Group video call", ts: "8:10 AM", kind: "video-call", duration: "4 min 32 sec" },
-      { id: "m5", authorId: "u1", text: "All vitals captured for @Mary Lou. Starting reassessment now.", ts: "8:14 AM" },
+      { id: "m4", authorId: "u8", text: "Care huddle scheduled for today at 10:30 AM: review confusion, intake decline, UA status, and next provider orders.", ts: "8:08 AM" },
+      { id: "m5", authorId: "u4", text: "Voice call", ts: "8:10 AM", kind: "voice-call", duration: "2 min 18 sec" },
+      { id: "m6", authorId: "u1", text: "All vitals captured for @Mary Lou. Starting reassessment now.", ts: "8:14 AM" },
+      { id: "m7", authorId: "u4", text: "Approved — start IV antibiotics. I'll round at 10.", ts: "8:18 AM" },
     ],
   },
   {
     id: "t2",
     kind: "dm",
     title: "Sarah Jenkins",
-    members: ["me", "u1"],
+    members: ["u8", "u1"],
+    purpose: "direct",
     image: residentImage(6),
-    lastMessage: "Want me to escalate to Dr. Cole?",
+    lastMessage: "I added the fresh vitals in Mary Lou's room.",
     lastTs: "12m",
     unread: 1,
     messages: [
-      { id: "m1", authorId: "u1", text: "@Mary Lou's mental status looks worse — disoriented to time.", ts: "8:18 AM" },
-      { id: "m2", authorId: "me", text: "Can you double-check her temp and HR?", ts: "8:19 AM" },
-      { id: "m3", authorId: "u1", text: "Temp 100.4, HR 104. Want me to escalate to Dr. Cole?", ts: "8:22 AM" },
+      { id: "m1", authorId: "u1", text: "I added the fresh vitals in Mary Lou's room.", ts: "8:18 AM" },
+      { id: "m2", authorId: "u8", text: "Thank you. Keep the resident thread updated if anything changes.", ts: "8:19 AM" },
+      { id: "m3", authorId: "u1", text: "Will do.", ts: "8:22 AM" },
     ],
   },
   {
     id: "t3",
     kind: "dm",
     title: "Dr. Hannah Cole",
-    members: ["me", "u4"],
+    members: ["u8", "u4"],
+    purpose: "direct",
     image: residentImage(3),
-    lastMessage: "Approved — start IV abx. I'll round at 10.",
+    lastMessage: "I'll watch the resident rooms for provider decisions.",
     lastTs: "34m",
     unread: 0,
     messages: [
-      { id: "m1", authorId: "me", text: "@Mary Lou — high suspicion UTI, requesting orders.", ts: "7:48 AM" },
+      { id: "m1", authorId: "u8", text: "I moved the Mary Lou updates into her care-team room so nursing and provider decisions stay together.", ts: "7:48 AM" },
       { id: "m2", authorId: "u4", text: "Voice call", ts: "7:52 AM", kind: "voice-call", duration: "2 min 18 sec" },
-      { id: "m3", authorId: "u4", text: "Approved — start IV abx. I'll round at 10.", ts: "7:55 AM" },
+      { id: "m3", authorId: "u4", text: "Good. I'll watch the resident rooms for provider decisions.", ts: "7:55 AM" },
     ],
   },
   {
     id: "t4",
     kind: "huddle",
-    title: "Falls Committee",
-    members: ["me", "u1", "u2", "u7"],
-    lastMessage: "Marcus: New incident report uploaded for @Walter.",
+    title: "Walter Jefferson Care Team",
+    members: ["u8", "u1", "u2", "u7"],
+    residentId: "2",
+    purpose: "resident-room",
+    lastMessage: "Marcus: New incident report uploaded for Walter.",
     lastTs: "1h",
     unread: 0,
     messages: [
-      { id: "m1", authorId: "u2", text: "New incident report uploaded for @Walter Jefferson.", ts: "7:10 AM" },
+      { id: "m1", authorId: "u2", text: "New incident report uploaded for Walter Jefferson.", ts: "7:10 AM" },
+      { id: "m2", authorId: "u8", text: "Post-fall follow-up huddle scheduled for today at 1:00 PM: align on x-ray status, transfer safety, and mobility restrictions.", ts: "7:40 AM" },
     ],
   },
   {
     id: "t5",
     kind: "dm",
     title: "Priya Anand",
-    members: ["me", "u3"],
+    members: ["u8", "u3"],
+    purpose: "direct",
     image: residentImage(1),
     lastMessage: "Bath done. @Doris is resting comfortably.",
     lastTs: "2h",

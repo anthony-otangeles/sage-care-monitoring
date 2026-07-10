@@ -1,6 +1,6 @@
 import type { Resident } from "./residents";
 
-export type IntelligenceSource = "PCC" | "Staff input" | "Provider input";
+export type IntelligenceSource = "Otangeles Notes+" | "Staff input" | "Provider input";
 export type IntelligenceSeverity = "normal" | "watch" | "high" | "critical";
 export type IntelligenceUrgency = "urgent" | "high" | "routine";
 
@@ -18,7 +18,7 @@ export interface ResidentSourceEvent {
 export interface ResidentDailyInput {
   id: string;
   residentId: string;
-  source: Exclude<IntelligenceSource, "PCC">;
+  source: Exclude<IntelligenceSource, "Otangeles Notes+">;
   label: string;
   detail: string;
   capturedAt: string;
@@ -45,11 +45,11 @@ interface ResidentIntelligenceInput {
   dailyInputs?: ResidentDailyInput[];
 }
 
-export const mockPccEvents: ResidentSourceEvent[] = [
+export const mockNotesPlusEvents: ResidentSourceEvent[] = [
   {
-    id: "pcc-ml-temp",
+    id: "notes-ml-temp",
     residentId: "1",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "vital",
     label: "Temperature",
     detail: "100.4 F, up from baseline 98.6 F",
@@ -57,9 +57,9 @@ export const mockPccEvents: ResidentSourceEvent[] = [
     severity: "critical",
   },
   {
-    id: "pcc-ml-hr",
+    id: "notes-ml-hr",
     residentId: "1",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "vital",
     label: "Heart rate",
     detail: "104 bpm, above baseline 88",
@@ -67,9 +67,9 @@ export const mockPccEvents: ResidentSourceEvent[] = [
     severity: "high",
   },
   {
-    id: "pcc-ml-intake",
+    id: "notes-ml-intake",
     residentId: "1",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "observation",
     label: "Meal intake",
     detail: "Breakfast intake documented at 30%",
@@ -77,9 +77,9 @@ export const mockPccEvents: ResidentSourceEvent[] = [
     severity: "high",
   },
   {
-    id: "pcc-ml-ua",
+    id: "notes-ml-ua",
     residentId: "1",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "order",
     label: "UA status",
     detail: "UA/culture not collected yet",
@@ -87,9 +87,9 @@ export const mockPccEvents: ResidentSourceEvent[] = [
     severity: "watch",
   },
   {
-    id: "pcc-wj-fall",
+    id: "notes-wj-fall",
     residentId: "2",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "incident",
     label: "Witnessed fall",
     detail: "Wheelchair transfer fall documented yesterday evening",
@@ -97,9 +97,9 @@ export const mockPccEvents: ResidentSourceEvent[] = [
     severity: "high",
   },
   {
-    id: "pcc-wj-pain",
+    id: "notes-wj-pain",
     residentId: "2",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "observation",
     label: "Hip pain",
     detail: "Left hip pain 4/10 during morning care",
@@ -107,9 +107,9 @@ export const mockPccEvents: ResidentSourceEvent[] = [
     severity: "high",
   },
   {
-    id: "pcc-wj-imaging",
+    id: "notes-wj-imaging",
     residentId: "2",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "order",
     label: "Imaging status",
     detail: "Hip x-ray ordered, result pending",
@@ -117,9 +117,9 @@ export const mockPccEvents: ResidentSourceEvent[] = [
     severity: "watch",
   },
   {
-    id: "pcc-ev-abx",
+    id: "notes-ev-abx",
     residentId: "3",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "medication",
     label: "Antibiotic course",
     detail: "Levofloxacin course completed after pneumonia",
@@ -127,9 +127,9 @@ export const mockPccEvents: ResidentSourceEvent[] = [
     severity: "watch",
   },
   {
-    id: "pcc-ev-o2",
+    id: "notes-ev-o2",
     residentId: "3",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "vital",
     label: "SpO2",
     detail: "96% on room air with clear lung sounds",
@@ -137,9 +137,9 @@ export const mockPccEvents: ResidentSourceEvent[] = [
     severity: "normal",
   },
   {
-    id: "pcc-ht-bg-1",
+    id: "notes-ht-bg-1",
     residentId: "4",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "lab",
     label: "Fasting blood glucose",
     detail: "185 this morning; third consecutive AM above goal",
@@ -147,9 +147,9 @@ export const mockPccEvents: ResidentSourceEvent[] = [
     severity: "high",
   },
   {
-    id: "pcc-ht-diet",
+    id: "notes-ht-diet",
     residentId: "4",
-    source: "PCC",
+    source: "Otangeles Notes+",
     type: "observation",
     label: "Diet variance",
     detail: "Family-provided cookies documented after dinner",
@@ -160,7 +160,7 @@ export const mockPccEvents: ResidentSourceEvent[] = [
 
 function residentEvents(residentId: string, dailyInputs: ResidentDailyInput[]) {
   return [
-    ...mockPccEvents.filter((event) => event.residentId === residentId),
+    ...mockNotesPlusEvents.filter((event) => event.residentId === residentId),
     ...dailyInputs.filter((input) => input.residentId === residentId).map((input): ResidentSourceEvent => ({
       ...input,
       type: "observation",
@@ -190,8 +190,8 @@ export function buildResidentIntelligence({
     const facility = facilityForResident(resident);
 
     if (
-      hasEvent(events, (event) => event.id === "pcc-ml-temp") &&
-      hasEvent(events, (event) => event.id === "pcc-ml-intake")
+      hasEvent(events, (event) => event.id === "notes-ml-temp") &&
+      hasEvent(events, (event) => event.id === "notes-ml-intake")
     ) {
       opportunities.push({
         id: `intel-${resident.id}-infection-risk`,
@@ -208,13 +208,13 @@ export function buildResidentIntelligence({
         urgency: "urgent",
         confidence: 92,
         recommendedAction: "Provider should review today, order/confirm UA with culture, and set hydration and mental-status follow-up.",
-        evidence: evidenceFor(events, ["pcc-ml-temp", "pcc-ml-hr", "pcc-ml-intake", "pcc-ml-ua"]),
+        evidence: evidenceFor(events, ["notes-ml-temp", "notes-ml-hr", "notes-ml-intake", "notes-ml-ua"]),
       });
     }
 
     if (
-      hasEvent(events, (event) => event.id === "pcc-wj-fall") &&
-      hasEvent(events, (event) => event.id === "pcc-wj-pain")
+      hasEvent(events, (event) => event.id === "notes-wj-fall") &&
+      hasEvent(events, (event) => event.id === "notes-wj-pain")
     ) {
       opportunities.push({
         id: `intel-${resident.id}-post-fall`,
@@ -227,13 +227,13 @@ export function buildResidentIntelligence({
         urgency: "high",
         confidence: 86,
         recommendedAction: "Keep fall precautions active, review imaging, and update nursing mobility instructions.",
-        evidence: evidenceFor(events, ["pcc-wj-fall", "pcc-wj-pain", "pcc-wj-imaging"]),
+        evidence: evidenceFor(events, ["notes-wj-fall", "notes-wj-pain", "notes-wj-imaging"]),
       });
     }
 
     if (
-      hasEvent(events, (event) => event.id === "pcc-ht-bg-1") &&
-      hasEvent(events, (event) => event.id === "pcc-ht-diet")
+      hasEvent(events, (event) => event.id === "notes-ht-bg-1") &&
+      hasEvent(events, (event) => event.id === "notes-ht-diet")
     ) {
       opportunities.push({
         id: `intel-${resident.id}-glycemic-trend`,
@@ -246,13 +246,13 @@ export function buildResidentIntelligence({
         urgency: "routine",
         confidence: 78,
         recommendedAction: "Request diet teaching, monitor fasting BG trend, and consider provider review if values continue above goal.",
-        evidence: evidenceFor(events, ["pcc-ht-bg-1", "pcc-ht-diet"]),
+        evidence: evidenceFor(events, ["notes-ht-bg-1", "notes-ht-diet"]),
       });
     }
 
     if (
-      hasEvent(events, (event) => event.id === "pcc-ev-abx") &&
-      hasEvent(events, (event) => event.id === "pcc-ev-o2")
+      hasEvent(events, (event) => event.id === "notes-ev-abx") &&
+      hasEvent(events, (event) => event.id === "notes-ev-o2")
     ) {
       opportunities.push({
         id: `intel-${resident.id}-post-antibiotic`,
@@ -265,12 +265,12 @@ export function buildResidentIntelligence({
         urgency: "routine",
         confidence: 74,
         recommendedAction: "Schedule a post-antibiotic respiratory reassessment and document rebound symptom check.",
-        evidence: evidenceFor(events, ["pcc-ev-abx", "pcc-ev-o2"]),
+        evidence: evidenceFor(events, ["notes-ev-abx", "notes-ev-o2"]),
       });
     }
 
     const flaggedDailyInputs = events.filter(
-      (event) => event.source !== "PCC" && (event.severity === "high" || event.severity === "critical"),
+      (event) => event.source !== "Otangeles Notes+" && (event.severity === "high" || event.severity === "critical"),
     );
     if (flaggedDailyInputs.length) {
       const latest = flaggedDailyInputs[0];
@@ -307,7 +307,7 @@ export function buildResidentIntelligence({
             {
               id: `resident-${resident.id}-${abnormalVital.label}`,
               residentId: resident.id,
-              source: "PCC",
+              source: "Otangeles Notes+",
               type: "vital",
               label: abnormalVital.label,
               detail: `${abnormalVital.current} vs baseline ${abnormalVital.base}`,

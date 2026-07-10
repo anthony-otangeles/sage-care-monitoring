@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, type Component } from "vue";
+import { computed, nextTick, ref, watch, type Component } from "vue";
 import {
   Activity,
   AlertCircle,
@@ -18,6 +18,7 @@ import {
   ChevronUp,
   Clock,
   Coffee,
+  Edit3,
   Eye,
   FileText,
   GitBranch,
@@ -28,18 +29,23 @@ import {
   Lock,
   LogOut,
   MessageCircle,
+  MessageSquarePlus,
   Mic,
   Moon,
   MoreVertical,
   Phone,
   Search,
   Send,
+  Signature,
   Settings,
   Shield,
   Smile,
   Thermometer,
   TrendingDown,
   TrendingUp,
+  Trash2,
+  Undo2,
+  Upload,
   User as UserIcon,
   UserCheck,
   Users,
@@ -52,7 +58,7 @@ import colors from "../constants/colors";
 import AppSelect from "./components/AppSelect.vue";
 import {
   buildResidentIntelligence,
-  mockPccEvents,
+  mockNotesPlusEvents,
   type IntelligenceSource,
   type IntelligenceUrgency,
   type ResidentDailyInput,
@@ -86,6 +92,7 @@ type ViewName =
   | "provider-sage"
   | "provider-collaboration"
   | "provider-visit"
+  | "provider-review"
   | "provider-profile"
   | "cna-home"
   | "cna-debrief"
@@ -97,15 +104,32 @@ type ResidentContextTab = "updates" | "actions" | "orders";
 type SituationAccordionKey = "facility-focus" | "requested-actions" | "facility-intelligence" | "current-watches";
 type ProviderHomeAccordionKey = "review-decide" | "facility-intelligence" | "assigned-actions" | "clinical-attention";
 type VisitNoteMode = "text" | "voice";
-type ProviderVisitStatus = "in-progress" | "completed";
-type MessageTab = "threads" | "new";
+type ProviderEncounterStatus =
+  | "scheduled"
+  | "provider-in-progress"
+  | "scribe-in-progress"
+  | "needs-review"
+  | "revision"
+  | "submitted-to-billing";
+type ProviderVisitSyncStatus = "pending" | "synced";
+type EncounterSectionKind = "paragraphs" | "bullets" | "grid";
+type RevisionThreadStatus = "open" | "addressed";
+type SignatureMethod = "draw" | "type" | "upload";
+type MessageTab = "rooms" | "people";
 type ScheduleView = "list" | "calendar";
 type ScheduleDraftType = "huddle" | "follow-up" | "clinical-order";
 type ScheduleStaffRole = RoleKey | "staff";
 type MessageStartMode = "message" | "voice-call" | "video-call";
+type ThreadUtilityMode = "summary" | "insight" | "transcription";
 type ActionTargetRole = "provider" | "cna";
 type ActionPriority = "Stat" | "High" | "Routine";
 type SelectOption = { value: string; label: string };
+type NotificationTarget =
+  | { type: "resident"; residentId: string }
+  | { type: "encounter"; encounterId: string; residentId: string }
+  | { type: "schedule"; item: ResidentScheduleItem }
+  | { type: "action"; action: ActionRequest }
+  | { type: "escalation"; residentId: string };
 type ActionStatus = "open" | "in-progress" | "completed" | "flagged";
 type ActionStatusUpdateTarget = Extract<ActionStatus, "completed" | "flagged">;
 type EscalationStatus = "sent-to-hospital" | "requested-review";
@@ -196,6 +220,7 @@ interface ProviderOpportunity {
   id: string;
   residentId: string;
   resident: Resident;
+  visitType: VisitType;
   category: string;
   facility: Facility;
   reason: string;
@@ -214,7 +239,7 @@ interface FacilityIntelligenceSummary {
   high: number;
   routine: number;
   openActions: number;
-  pccEvents: number;
+  notesPlusEvents: number;
   staffInputs: number;
   providerInputs: number;
   residentsCovered: number;
@@ -223,6 +248,11 @@ interface FacilityIntelligenceSummary {
   inputGaps: string[];
   sources: IntelligenceSource[];
   topOpportunity: ProviderOpportunity | null;
+}
+
+interface ResidentProfileEvidenceGroup {
+  source: string;
+  items: string[];
 }
 
 interface CnaAssignment {
@@ -257,25 +287,85 @@ interface ProviderNote {
   encounterDraft?: EncounterDraft;
 }
 
+interface EncounterContentItem {
+  label?: string;
+  text: string;
+}
+
+interface RevisionComment {
+  id: string;
+  authorId: string;
+  authorName: string;
+  role: "provider" | "scribe";
+  body: string;
+  createdAt: string;
+}
+
+interface RevisionThread {
+  id: string;
+  status: RevisionThreadStatus;
+  comments: RevisionComment[];
+}
+
+interface EncounterSection {
+  id: string;
+  title: string;
+  kind: EncounterSectionKind;
+  content: EncounterContentItem[];
+  verified: boolean;
+  revisionThreads: RevisionThread[];
+  revisedAt?: string;
+}
+
+interface ProviderSignature {
+  method: SignatureMethod;
+  typedName?: string;
+  dataUrl?: string;
+  savedAt: string;
+}
+
+interface EncounterSignatureSnapshot extends ProviderSignature {
+  providerId: string;
+  providerName: string;
+  signedAt: string;
+}
+
 interface ProviderVisit {
   id: string;
   residentId: string;
   residentName: string;
+  providerUserId: string;
   providerName: string;
   visitType: VisitType;
+  scheduledDate: string;
+  scheduledTime: string;
+  clinicalPriority: "Urgent" | "High" | "Routine";
+  visitReason: string;
+  baselineChange: string;
+  supportingEvidence: string[];
   startedAt: string;
   startedAtMs: number;
   endedAt?: string;
   textNote: string;
   voiceTranscript: string;
   orderIds: string[];
-  status: ProviderVisitStatus;
+  status: ProviderEncounterStatus;
+  notesPlusSyncStatus: ProviderVisitSyncStatus;
+  notesPlusSyncedAt?: string;
+  assignedScribe?: string;
+  documentTitle: string;
+  sections: EncounterSection[];
+  signedSignature?: EncounterSignatureSnapshot;
 }
 
 interface EncounterModalDraft {
   residentName: string;
   visitType: VisitType;
   notes: string;
+}
+
+interface StartEncounterModalDraft {
+  visitType: VisitType;
 }
 
 interface CnaDebriefEntry {
@@ -288,12 +378,11 @@ interface CnaDebriefEntry {
 }
 
 interface ProfileState {
-  fullName: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   systemRole: string;
-  department: string;
-  specialization: string;
   assignedFacilities: Facility[];
   defaultFacility: FacilitySelection;
   time24Hour: boolean;
@@ -561,6 +650,17 @@ interface SuggestedPrompt {
   };
 }
 
+interface HeaderNotification {
+  id: string;
+  tone: string;
+  title: string;
+  detail: string;
+  meta: string;
+  icon: Component;
+  target: NotificationTarget;
+  unread?: boolean;
+}
+
 const theme = colors.light;
 
 const providerUser = getUser("u4") ?? donUser;
@@ -573,6 +673,30 @@ const facilities: Facility[] = [
   "Niles Care Center",
 ];
 
+// TODO(NOTES_PLUS): Replace this mock print masthead with the facility demographics received with encounter documents.
+const facilityDocumentDetails: Record<Facility, { address: string; phone: string; fax: string }> = {
+  "Brickyard Healthcare – Elkhart Care Center": {
+    address: "1001 W Hively Avenue, Elkhart, IN 46517",
+    phone: "(574) 555-0142",
+    fax: "(574) 555-0143",
+  },
+  "Brickyard Healthcare – Merrillville Care Center": {
+    address: "8800 Virginia Place, Merrillville, IN 46410",
+    phone: "(219) 555-0164",
+    fax: "(219) 555-0165",
+  },
+  "Casa of Hobart": {
+    address: "4410 W 49th Avenue, Hobart, IN 46342",
+    phone: "(219) 555-0172",
+    fax: "(219) 555-0173",
+  },
+  "Niles Care Center": {
+    address: "1200 Niles-Buchanan Road, Niles, MI 49120",
+    phone: "(269) 555-0182",
+    fax: "(269) 555-0183",
+  },
+};
+
 function selectOption(value: string, label = value): SelectOption {
   return { value, label };
 }
@@ -582,6 +706,25 @@ const defaultLoginUserIds: Record<RoleKey, string> = {
   provider: "u4",
   cna: "u3",
 };
+
+function normalizeSystemRole(role: string) {
+  return /^(medical provider|medical doctor)$/i.test(role) ? "Physician" : role;
+}
+
+function splitProfileName(name: string) {
+  const withoutHonorific = name.trim().replace(/^Dr\.\s+/i, "");
+  const parts = withoutHonorific.split(/\s+/).filter(Boolean);
+  if (!parts.length) {
+    return { firstName: "", lastName: "" };
+  }
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: "" };
+  }
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  };
+}
 
 function careUserById(userId: string) {
   return users.find((user) => user.id === userId) ?? (userId === donUser.id ? donUser : null);
@@ -711,7 +854,7 @@ const roleProfiles: Record<RoleKey, RoleProfile> = {
     key: "provider",
     label: "Provider",
     name: providerUser.name,
-    role: "Medical Provider",
+    role: "Physician",
     facility: "All Facilities",
     description: "Patient-centered clinical attention queue, notes, and documentation review.",
     image: providerUser.image,
@@ -738,8 +881,10 @@ const roleProfiles: Record<RoleKey, RoleProfile> = {
 function profileStateFromStaff(user: CareUser | null, role: RoleKey): ProfileState {
   const profile = roleProfiles[role];
   const fallbackName = user?.name ?? profile.name;
+  const { firstName, lastName } = splitProfileName(fallbackName);
   return {
-    fullName: fallbackName,
+    firstName,
+    lastName,
     email:
       user?.email ??
       `${fallbackName
@@ -747,13 +892,7 @@ function profileStateFromStaff(user: CareUser | null, role: RoleKey): ProfileSta
         .replace(/[^a-z0-9]+/g, ".")
         .replace(/^\.+|\.+$/g, "")}@sagecare.local`,
     phone: role === "provider" ? "(219) 555-0128" : role === "cna" ? "(219) 555-0146" : "(219) 555-0184",
-    systemRole: profile.role,
-    department:
-      user?.department ??
-      (role === "provider" ? "Medical Services" : role === "cna" ? "Nursing" : "Nursing Administration"),
-    specialization:
-      user?.specialization ??
-      (role === "provider" ? "Geriatric Primary Care" : role === "cna" ? "Long-Term Care" : "Facility Operations"),
+    systemRole: normalizeSystemRole(profile.role),
     assignedFacilities: userAssignedFacilities(user, role),
     defaultFacility: userDefaultFacility(user, role),
     time24Hour: true,
@@ -940,20 +1079,418 @@ const initialProviderNotes: ProviderNote[] = [
   },
 ];
 
-const initialProviderVisits: ProviderVisit[] = initialProviderNotes.map((note, index) => ({
-  id: `visit-${note.id}`,
-  residentId: note.residentId,
-  residentName: note.residentName,
-  providerName: index === 0 ? providerUser.name : "Dr. Aisha Rahman",
-  visitType: note.encounterDraft?.visitType ?? "Follow-Up",
-  startedAt: note.createdAt,
-  startedAtMs: Date.now() - (index + 2) * 45 * 60 * 1000,
-  endedAt: note.createdAt,
-  textNote: note.source === "typed" ? note.body : "",
-  voiceTranscript: note.source === "voice" ? note.body : "",
-  orderIds: [],
-  status: "completed",
-}));
+// TODO(NOTES_PLUS): Replace this reference-aligned mock document with the structured encounter sections received from Otangeles Notes+.
+function encounterSectionsForResident(resident: Resident): EncounterSection[] {
+  const primaryConcern = resident.situation.concerns[0]?.title ?? resident.latest;
+  const secondaryConcern = resident.situation.concerns[1]?.title ?? "Ongoing clinical monitoring";
+  const primaryConcernLower = primaryConcern.toLowerCase();
+  const currentVital = (label: string, fallback: string) =>
+    resident.situation.vitals.find((vital) => vital.label === label)?.current ?? fallback;
+  const primaryDiagnosis = primaryConcernLower.includes("uti")
+    ? "R41.0 - Disorientation, unspecified"
+    : primaryConcernLower.includes("fall")
+      ? "W19.XXXA - Unspecified fall, initial encounter"
+      : primaryConcernLower.includes("pain")
+        ? "R52 - Pain, unspecified"
+        : "R69 - Illness, unspecified";
+
+  return [
+    {
+      id: "code-status",
+      title: "Code Status",
+      kind: "bullets",
+      content: [
+        { text: resident.codeStatus },
+        {
+          text:
+            resident.codeStatus === "Full Code"
+              ? "All life-sustaining measures are permitted, including CPR, intubation, defibrillation, and advanced life support."
+              : `Current documented directive: ${resident.codeStatus}. Follow facility policy and the resident's active advance-directive record.`,
+        },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "chief-complaint",
+      title: "Chief Complaint",
+      kind: "paragraphs",
+      content: [
+        { label: "Medical necessity", text: "Patient Request" },
+        { label: "Reason for visit", text: primaryConcern },
+        { text: resident.situation.summary },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "history-present-illness",
+      title: "History of Present Illness",
+      kind: "paragraphs",
+      content: [
+        {
+          text: `${resident.name} is a ${resident.age}-year-old ${resident.sex === "F" ? "female" : "male"} resident who presents for ${primaryConcernLower}. Symptoms represent a change from the resident's documented baseline and were reported by facility staff during the current monitoring period.`,
+        },
+        { label: "Current symptoms", text: resident.latest },
+        { label: "Clinical context", text: resident.situation.summary },
+        { label: "Relevant history", text: resident.situation.memory },
+        { label: "Severity", text: "Mild to moderate; requires provider assessment and continued facility monitoring." },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "medical-history",
+      title: "Past Medical History",
+      kind: "bullets",
+      content: [
+        { text: "Type 2 diabetes mellitus" },
+        { text: "Hypertension" },
+        { text: primaryConcern },
+        { text: secondaryConcern },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "past-surgical-history",
+      title: "Past Surgical History",
+      kind: "bullets",
+      content: [
+        { text: "No Prior Surgeries" },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "social-history",
+      title: "Social History",
+      kind: "grid",
+      content: [
+        { label: "Alcohol Use", text: "Unknown" },
+        { label: "Drugs / Substance Use", text: "Unknown" },
+        { label: "Tobacco / Nicotine Use", text: "Unknown" },
+        { label: "Drinking Type", text: "Unknown" },
+        { label: "Marital Status", text: "Unknown" },
+        { label: "Sexual Activity", text: "Not currently sexually active" },
+        { label: "Sex at Birth", text: resident.sex === "F" ? "Female" : "Male" },
+        { label: "Residence", text: "Skilled nursing facility" },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "family-history",
+      title: "Family History",
+      kind: "grid",
+      content: [
+        { label: "Father", text: "Condition: Stroke · Deceased: Yes · Age of onset: 70" },
+        { label: "Mother", text: "Condition: Heart Disease · Deceased: Yes · Age of onset: 60" },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "immunizations",
+      title: "Immunizations",
+      kind: "grid",
+      content: [
+        { label: "Document Vaccines", text: "Present" },
+        { label: "Influenza", text: "10/12/2025" },
+        { label: "Pneumococcal", text: "Documented in facility record" },
+        { label: "COVID-19", text: "Primary series documented" },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "vital-signs",
+      title: "Vital Signs",
+      kind: "grid",
+      content: [
+        { label: "Blood Pressure", text: currentVital("Blood Pressure", "119/78 mmHg") },
+        { label: "Pain Scale", text: "0/10" },
+        { label: "Heart Rate", text: `${currentVital("Heart Rate", "68")} bpm` },
+        { label: "Blood Glucose", text: "145 mg/dL" },
+        { label: "Respiratory Rate", text: "21 /min" },
+        { label: "Weight", text: "170 lb" },
+        { label: "Temperature", text: currentVital("Temperature", "98.9 °F") },
+        { label: "Height", text: "68 in" },
+        { label: "Oxygen Saturation", text: currentVital("SpO2", "96%") },
+        { label: "Calculated BMI", text: "25.8 kg/m²" },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "allergies",
+      title: "Allergies",
+      kind: "bullets",
+      content: [
+        { label: "Reported", text: "Metformin" },
+        { label: "Reaction", text: "Diarrhea" },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "medications",
+      title: "Medications",
+      kind: "paragraphs",
+      content: [
+        { text: "Medication reviewed. No medication changes made during this encounter." },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "review-of-systems",
+      title: "Review of Systems",
+      kind: "grid",
+      content: [
+        { label: "General", text: "Patient denies excessive daytime sleepiness, fever, weight gain, malaise, fatigue, low energy, and weight loss unless documented in the HPI." },
+        { label: "Eyes", text: "Patient denies discharge, eye pain, photophobia, itching, eye redness, and visual disturbance." },
+        { label: "Ears, Nose, Mouth / Throat", text: "Patient denies ear pain, hearing change, rhinorrhea, sore throat, and difficulty swallowing." },
+        { label: "Cardiovascular", text: "Patient denies chest pain, palpitations, temperature changes to distal extremities, tightness, and swelling." },
+        { label: "Respiratory", text: "Patient denies cough, dyspnea, hemoptysis, orthopnea, and wheezing." },
+        { label: "Gastrointestinal", text: "Patient denies abdominal pain, constipation, diarrhea, nausea, and vomiting." },
+        { label: "Genitourinary", text: primaryConcernLower.includes("uti") ? "Reports: Urinary change documented by facility staff · Patient denies flank pain and gross hematuria." : "Patient denies dysuria, frequency, urgency, and hematuria." },
+        { label: "Musculoskeletal", text: "Patient denies joint pain, limited range of motion, muscle weakness, and joint swelling unless otherwise documented." },
+        { label: "Skin", text: "Patient denies changes in hair or nails, scaling, bruising, ulcers, rash, and changes in skin color." },
+        { label: "Neurologic", text: `Reports: ${resident.latest} · Patient denies seizure, tremor, and syncope.` },
+        { label: "Psychiatric", text: "Patient denies depressed mood, memory loss, anxiety, hallucinations, and suicidal ideation unless otherwise documented." },
+        { label: "Endocrine", text: "Patient denies heat or cold intolerance, loss of hair, increased thirst, and increased urination." },
+        { label: "Hematologic / Lymphatic", text: "Patient denies anemia, easy bruising, bleeding, and enlarged lymph nodes." },
+        { label: "Allergy / Immunology", text: "Patient denies environmental allergies, hives, and recurrent infections." },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "physical-exam",
+      title: "Physical Exam",
+      kind: "grid",
+      content: [
+        { label: "General", text: "Awake: Yes · Alert: Yes · Engaged: Yes" },
+        { label: "Ears, Nose, Mouth / Throat", text: "Voice appearance: Normal · External ear appearance: Normal · Hearing adequate to conversation" },
+        { label: "Eyes", text: "Conjunctiva normal · Extraocular movements intact · Pupils equal, round, and reactive" },
+        { label: "Neck", text: "Trachea midline · Range of motion normal · No visible masses" },
+        { label: "Cardiovascular", text: "Rate normal · Rhythm regular · Peripheral pulses present · Edema absent" },
+        { label: "Respiratory", text: "Effort normal · Breath sounds normal · Respiratory distress absent" },
+        { label: "Gastrointestinal", text: "Bowel sounds normal · Abdomen soft · Tenderness absent · Distention absent" },
+        { label: "Genitourinary", text: "Flank tenderness absent · Urinary catheter absent" },
+        { label: "Musculoskeletal", text: "Posture normal · Range of motion preserved · Focal swelling absent" },
+        { label: "Skin", text: "Texture normal · Warm · Rash absent · Ulceration absent" },
+        { label: "Neurologic", text: "Mental status interpreted against baseline · Tremor absent · Focal deficit absent" },
+        { label: "Psychiatric", text: "Cooperative · Mood normal · Affect appropriate · Behavior normal" },
+        { label: "Hematologic", text: "Bruising absent · Active bleeding absent" },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "assessment-plan",
+      title: "Assessment & Plan",
+      kind: "paragraphs",
+      content: [
+        { label: "Medical Decision Making", text: `${primaryConcern} was addressed during this follow-up encounter. The available facility history, current symptoms, vital signs, medication record, and nursing observations were reviewed. The resident remains appropriate for continued facility management with close monitoring and escalation for material change.` },
+        { label: primaryDiagnosis, text: `Status: Active · Plan: Evaluate and monitor ${primaryConcernLower}; correlate with pending results and nursing observations.` },
+        { label: "I10 - Hypertension", text: "Status: Chronic, stable · Continue current antihypertensive regimen and ordered blood-pressure monitoring." },
+        { label: "E11.9 - Type 2 diabetes mellitus without complications", text: "Status: Chronic, stable · Continue current diabetic plan, glucose monitoring, and facility diet." },
+        { label: "Follow-up", text: "Reassess after pending results or sooner for worsening symptoms, abnormal vital signs, or additional change from baseline." },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "notes",
+      title: "Notes",
+      kind: "paragraphs",
+      content: [
+        { text: "No provider text or voice note has been captured in SAGE for this encounter." },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+    {
+      id: "cpt-codes",
+      title: "CPT Codes",
+      kind: "bullets",
+      content: [
+        { text: "99308 - Subsequent nursing facility care" },
+      ],
+      verified: false,
+      revisionThreads: [],
+    },
+  ];
+}
+
+function syncProviderNoteIntoEncounterDocument(encounter: ProviderVisit) {
+  // TODO(NOTES_PLUS): Preserve the provider note source when the ended encounter payload is embedded into the remote Notes section.
+  const notesSection = encounter.sections.find((section) => section.id === "notes");
+  if (!notesSection) {
+    return;
+  }
+
+  const providerNotes: EncounterContentItem[] = [];
+  if (encounter.textNote.trim()) {
+    providerNotes.push({ label: "Provider Text Note", text: encounter.textNote.trim() });
+  }
+  if (encounter.voiceTranscript.trim()) {
+    providerNotes.push({ label: "Provider Voice Note Transcript", text: encounter.voiceTranscript.trim() });
+  }
+
+  notesSection.content = providerNotes.length
+      ? providerNotes
+      : [{ text: "No provider text or voice note has been captured in SAGE for this encounter." }];
+}
+
+function splitEncounterDetail(text: string) {
+  return text
+    .split(" · ")
+    .map((detail) => detail.trim())
+    .filter(Boolean);
+}
+
+function mockEncounterPriority(resident: Resident): ProviderVisit["clinicalPriority"] {
+  if (
+    resident.statusChips.includes("DECLINING") ||
+    resident.situation.vitals.some((vital) => vital.isCritical)
+  ) {
+    return "Urgent";
+  }
+  if (
+    resident.acuity === "WATCHFUL" ||
+    resident.situation.vitals.some((vital) => vital.isAbnormal)
+  ) {
+    return "High";
+  }
+  return "Routine";
+}
+
+function mockEncounterVisitType(resident: Resident): VisitType {
+  const context = `${resident.latest} ${resident.situation.summary}`.toLowerCase();
+  if (context.includes("fall")) {
+    return "Telemed - Fall Assessment";
+  }
+  if (context.includes("wound")) {
+    return "Wound Care";
+  }
+  if (context.includes("pain")) {
+    return "Chronic Pain Management";
+  }
+  return "Acute";
+}
+
+function mockEncounterEvidence(resident: Resident) {
+  return [
+    ...resident.situation.concerns.map((concern) => `${concern.title}: ${concern.status}`),
+    ...resident.situation.vitals
+      .filter((vital) => vital.isAbnormal)
+      .map((vital) => `${vital.label}: ${vital.current} vs baseline ${vital.base}`),
+  ];
+}
+
+function seededEncounter(
+  id: string,
+  resident: Resident,
+  status: ProviderEncounterStatus,
+  visitType: VisitType,
+  scheduledTime: string,
+): ProviderVisit {
+  const now = Date.now();
+  const textNote = status === "scheduled" ? "" : resident.situation.summary;
+  const encounter: ProviderVisit = {
+    id,
+    residentId: resident.id,
+    residentName: resident.name,
+    providerUserId: providerUser.id,
+    providerName: providerUser.name,
+    visitType,
+    scheduledDate: todayDateKey(),
+    scheduledTime,
+    clinicalPriority: mockEncounterPriority(resident),
+    visitReason: resident.situation.concerns[0]?.title ?? resident.latest,
+    baselineChange: resident.latest,
+    supportingEvidence: mockEncounterEvidence(resident),
+    startedAt: status === "scheduled" ? "" : scheduledTime,
+    startedAtMs: now - 2 * 60 * 60 * 1000,
+    endedAt: status === "scheduled" || status === "provider-in-progress" ? undefined : scheduledTime,
+    textNote,
+    voiceTranscript: "",
+    orderIds: [],
+    status,
+    notesPlusSyncStatus: status === "scheduled" || status === "provider-in-progress" ? "pending" : "synced",
+    notesPlusSyncedAt: status === "scheduled" || status === "provider-in-progress" ? undefined : scheduledTime,
+    assignedScribe: status === "scheduled" || status === "provider-in-progress" ? undefined : "Mark Rivera, Scribe",
+    documentTitle: "Progress Notes",
+    sections: encounterSectionsForResident(resident),
+  };
+  syncProviderNoteIntoEncounterDocument(encounter);
+  return encounter;
+}
+
+const needsReviewEncounter = seededEncounter("enc-needs-review", residents[0], "needs-review", "Acute", "8:40 AM");
+const revisionEncounter = seededEncounter("enc-revision", residents[1], "revision", "Telemed - Fall Assessment", "9:10 AM");
+const revisionAssessmentPlanSection = revisionEncounter.sections.find(
+  (section) => section.id === "assessment-plan",
+);
+if (revisionAssessmentPlanSection) {
+  revisionAssessmentPlanSection.revisionThreads = [
+    {
+      id: "revision-walter-plan",
+      status: "open",
+      comments: [
+        {
+          id: "revision-walter-plan-root",
+          authorId: providerUser.id,
+          authorName: providerUser.name,
+          role: "provider",
+          body: "Please clarify the mobility restriction and include the pending hip x-ray follow-up plan.",
+          createdAt: "10:18 AM",
+        },
+      ],
+    },
+  ];
+}
+
+const submittedEncounter = seededEncounter("enc-submitted", residents[2], "submitted-to-billing", "Follow-Up", "7:45 AM");
+submittedEncounter.sections.forEach((section) => { section.verified = true; });
+submittedEncounter.signedSignature = {
+  method: "type",
+  typedName: providerUser.name,
+  savedAt: "Yesterday, 4:12 PM",
+  providerId: providerUser.id,
+  providerName: providerUser.name,
+  signedAt: "Yesterday, 4:12 PM",
+};
+
+const downstreamMockResidentIds = new Set([
+  needsReviewEncounter.residentId,
+  revisionEncounter.residentId,
+  submittedEncounter.residentId,
+  residents[3].id,
+]);
+const mockDailyVisitResidents = priorityResidents
+  .filter((resident) => !downstreamMockResidentIds.has(resident.id))
+  .slice(0, 4);
+const mockDailyVisitTimes = ["8:15 AM", "9:00 AM", "10:30 AM", "11:15 AM"];
+
+const initialProviderVisits: ProviderVisit[] = [
+  needsReviewEncounter,
+  revisionEncounter,
+  submittedEncounter,
+  seededEncounter("enc-scribe-progress", residents[3], "scribe-in-progress", "30-Day Follow Up", "10:00 AM"),
+  ...mockDailyVisitResidents.map((resident, index) =>
+    seededEncounter(
+      `enc-scheduled-${index + 1}`,
+      resident,
+      "scheduled",
+      mockEncounterVisitType(resident),
+      mockDailyVisitTimes[index] ?? "1:00 PM",
+    ),
+  ),
+];
 
 const cnaAssignments: CnaAssignment[] = [
   {
@@ -1039,7 +1576,7 @@ const providerActionTypes = [
   "Review resident",
   "Place/update orders",
   "Evaluate acute change",
-  "Create visit note",
+  "Create encounter note",
   "Review labs/imaging",
 ];
 
@@ -1074,11 +1611,11 @@ const initialActionRequests: ActionRequest[] = [
     assignedRole: "provider",
     assignedUserId: providerRecipientIds[0] ?? "u4",
     actionType: "Evaluate acute change",
-    instructions: "Review worsening confusion, fever trend, intake decline, and UA status. Provide next orders or visit plan.",
+    instructions: "Review worsening confusion, fever trend, intake decline, and UA status. Provide next orders or encounter plan.",
     dueTime: "Now",
     status: "open",
     sourceScreen: "DON Situation",
-    linkedThreadId: "t3",
+    linkedThreadId: "t1",
     createdAt: "7:48 AM",
     updatedAt: "7:48 AM",
   },
@@ -1229,7 +1766,7 @@ const initialClinicalOrders: ClinicalOrder[] = [
     instructions: "Route result to provider and notify nursing if fever or mental status worsens.",
     destination: "Otangeles Notes+",
     status: "ordered",
-    linkedThreadId: "t3",
+    linkedThreadId: "t1",
     createdAt: "8:44 AM",
   },
   {
@@ -1292,13 +1829,19 @@ const showDelegate = ref(false);
 const assignedNurse = ref<{ name: string; time: string } | null>(null);
 const workingCareSteps = ref<Resident["careSteps"] | null>(null);
 
-const messageTab = ref<MessageTab>("threads");
+const messageTab = ref<MessageTab>("rooms");
 const selectedUserIds = ref<string[]>([]);
 const selectedThreadId = ref<string | null>(null);
 const createdThreads = ref<Thread[]>([]);
 const threadMessages = ref<ThreadMessage[]>([]);
 const threadDraft = ref("");
 const threadMenuOpen = ref(false);
+const threadRenameModalOpen = ref(false);
+const threadRenameDraft = ref("");
+const threadUtilityModal = ref<ThreadUtilityMode | null>(null);
+const threadUtilityMessageId = ref<string | null>(null);
+const messageSearchOpen = ref(false);
+const messageSearchQuery = ref("");
 const residentSearchOpen = ref(false);
 const residentSearchQuery = ref("");
 const providerResidentSearchOpen = ref(false);
@@ -1308,15 +1851,66 @@ const cnaResidentSearchQuery = ref("");
 const scheduleView = ref<ScheduleView>("list");
 const providerNoteDraft = ref("");
 const providerNotesState = ref<ProviderNote[]>([...initialProviderNotes]);
+
+const ENCOUNTER_STORAGE_KEY = "sage.mock.encounters.v4";
+const SIGNATURE_STORAGE_KEY = "sage.mock.provider-signatures.v1";
+
+function cloneInitialProviderVisits() {
+  return structuredClone(initialProviderVisits);
+}
+
+function loadPersistedProviderVisits() {
+  if (typeof window === "undefined") {
+    return cloneInitialProviderVisits();
+  }
+  try {
+    const raw = window.localStorage.getItem(ENCOUNTER_STORAGE_KEY);
+    if (!raw) {
+      return cloneInitialProviderVisits();
+    }
+    const parsed = JSON.parse(raw) as { version?: number; visits?: ProviderVisit[] };
+    if (parsed.version !== 4 || !Array.isArray(parsed.visits)) {
+      return cloneInitialProviderVisits();
+    }
+    return parsed.visits;
+  } catch {
+    return cloneInitialProviderVisits();
+  }
+}
+
+function loadPersistedProviderSignatures() {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(SIGNATURE_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw) as { version?: number; signatures?: Record<string, ProviderSignature> };
+    return parsed.version === 1 && parsed.signatures && typeof parsed.signatures === "object"
+      ? parsed.signatures
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 const providerVisitsState = ref<ProviderVisit[]>(
-  initialProviderVisits.map((visit) => ({ ...visit, orderIds: [...visit.orderIds] })),
+  loadPersistedProviderVisits(),
 );
+const providerSignatures = ref<Record<string, ProviderSignature>>(loadPersistedProviderSignatures());
 const activeVisitId = ref<string | null>(null);
+const activeReviewVisitId = ref<string | null>(null);
 const visitNoteMode = ref<VisitNoteMode>("text");
 const visitRecordingActive = ref(false);
 const visitRecordingSeconds = ref(0);
 const visitElapsedSeconds = ref(0);
 const visitStopConfirmOpen = ref(false);
+const startEncounterResidentId = ref<string | null>(null);
+const startEncounterDraft = ref<StartEncounterModalDraft>({
+  visitType: "Follow-Up",
+});
 const expandedProviderNoteId = ref<string | null>(null);
 const encounterModalNoteId = ref<string | null>(null);
 const encounterModalDraft = ref<EncounterModalDraft>({
@@ -1328,6 +1922,20 @@ const deleteProviderNoteId = ref<string | null>(null);
 const providerRecordingActive = ref(false);
 const providerRecordingSeconds = ref(0);
 const providerTranscript = ref("");
+const revisionModalSectionId = ref<string | null>(null);
+const revisionModalThreadId = ref<string | null>(null);
+const revisionModalText = ref("");
+const revisionReplyDrafts = ref<Record<string, string>>({});
+const signatureSetupPromptOpen = ref(false);
+const signEncounterConfirmOpen = ref(false);
+const signatureMode = ref<SignatureMethod>("draw");
+const signatureTypedName = ref("");
+const signatureUploadPreview = ref("");
+const signatureCanvas = ref<HTMLCanvasElement | null>(null);
+const signatureCanvasDirty = ref(false);
+const signatureDrawing = ref(false);
+const signatureError = ref("");
+const signatureSavedMessage = ref("");
 
 const selectedCnaAssignmentId = ref(cnaAssignments[0]?.id ?? "");
 const cnaDebriefDraft = ref("");
@@ -1362,6 +1970,9 @@ const profileModal = ref<ProfileModalKey | null>(null);
 const selectedFeatureId = ref("");
 const showSignOutModal = ref(false);
 const profileMenuOpen = ref(false);
+const notificationMenuOpen = ref(false);
+const readNotificationIds = ref<string[]>([]);
+const residentActionMenuOpen = ref(false);
 const passwordDraft = ref({ current: "", next: "", confirm: "" });
 const profileChangesAppliedAt = ref<Record<RoleKey, string>>({
   don: "Not applied this session",
@@ -1385,6 +1996,71 @@ const scheduleFollowUps = ref<ScheduleFollowUp[]>(
 const clinicalOrders = ref<ClinicalOrder[]>(
   initialClinicalOrders.map((order) => ({ ...order })),
 );
+
+watch(
+  providerVisitsState,
+  (visits) => {
+    try {
+      window.localStorage.setItem(ENCOUNTER_STORAGE_KEY, JSON.stringify({ version: 4, visits }));
+    } catch {
+      // Local persistence is best-effort in this frontend-only prototype.
+    }
+  },
+  { deep: true },
+);
+
+watch(
+  providerSignatures,
+  (signatures) => {
+    try {
+      window.localStorage.setItem(SIGNATURE_STORAGE_KEY, JSON.stringify({ version: 1, signatures }));
+    } catch {
+      signatureError.value = "The signature could not be saved in this browser. Try a smaller image.";
+    }
+  },
+  { deep: true },
+);
+
+function fetchDailyEncountersFromNotesPlus() {
+  // TODO(NOTES_PLUS): Replace the local encounter fixtures with the provider's Daily Visit List API response.
+  return providerVisitsState.value.filter((encounter) => encounter.scheduledDate === todayDateKey());
+}
+
+function syncEndedEncounterToNotesPlus(encounter: ProviderVisit) {
+  // TODO(NOTES_PLUS): POST the provider's text/voice note and linked orders, then use the returned Encounter identifier.
+  encounter.notesPlusSyncStatus = "synced";
+  encounter.notesPlusSyncedAt = currentTimeLabel();
+}
+
+function receiveEncounterStatusFromNotesPlus(encounter: ProviderVisit, status: ProviderEncounterStatus) {
+  // TODO(NOTES_PLUS): Replace this mock transition with inbound webhook/polling updates from Otangeles Notes+.
+  encounter.status = status;
+}
+
+function returnEncounterRevisionToNotesPlus(encounter: ProviderVisit) {
+  // TODO(NOTES_PLUS): Send open section revision threads and update the remote Encounter to Revision.
+  receiveEncounterStatusFromNotesPlus(encounter, "revision");
+}
+
+function submitSignedEncounterToNotesPlus(encounter: ProviderVisit) {
+  // TODO(NOTES_PLUS): Send the signed document snapshot and update the remote Encounter to Submitted to Billing.
+  receiveEncounterStatusFromNotesPlus(encounter, "submitted-to-billing");
+}
+
+function scheduledVisitTypeForOpportunityCategory(category: string): VisitType {
+  const normalized = category.toLowerCase();
+  if (normalized.includes("acute") || normalized.includes("staff concern")) {
+    return "Acute";
+  }
+  if (normalized.includes("fall")) {
+    return "Telemed - Fall Assessment";
+  }
+  if (normalized.includes("post-antibiotic") || normalized.includes("follow-up") || normalized.includes("trend")) {
+    return "Follow-Up";
+  }
+  return "Follow-Up";
+}
+
 const residentDailyInputs = computed<ResidentDailyInput[]>(() => [
   ...cnaDebriefs.value
     .filter((entry) => entry.transcript.trim())
@@ -1439,6 +2115,7 @@ const providerOpportunities = computed<ProviderOpportunity[]>(() =>
         ? {
             ...opportunity,
             resident,
+            visitType: scheduledVisitTypeForOpportunityCategory(opportunity.category),
             facility: opportunity.facility as Facility,
           }
         : null;
@@ -1536,7 +2213,7 @@ const activeRole = computed<RoleProfile>(() => ({
   ...roleProfiles[selectedRole.value],
   ...activeRoleMetric.value,
   name: activeStaffUser.value.name,
-  role: activeStaffUser.value.role,
+  role: normalizeSystemRole(activeStaffUser.value.role),
   image: activeStaffUser.value.image,
 }));
 const activeProfile = computed(() => profileStates.value[selectedRole.value]);
@@ -1575,12 +2252,12 @@ const facilityIntelligenceSummaries = computed<FacilityIntelligenceSummary[]>(()
     .map((facility) => {
       const facilityResidents = residents.filter((resident) => residentFacility(resident) === facility);
       const facilityResidentIds = new Set(facilityResidents.map((resident) => resident.id));
-      const pccEvents = mockPccEvents.filter((event) => facilityResidentIds.has(event.residentId));
+      const notesPlusEvents = mockNotesPlusEvents.filter((event) => facilityResidentIds.has(event.residentId));
       const dailyInputs = residentDailyInputs.value.filter((input) => facilityResidentIds.has(input.residentId));
       const staffInputs = dailyInputs.filter((input) => input.source === "Staff input");
       const providerInputs = dailyInputs.filter((input) => input.source === "Provider input");
       const coveredResidentIds = new Set([
-        ...pccEvents.map((event) => event.residentId),
+        ...notesPlusEvents.map((event) => event.residentId),
         ...dailyInputs.map((input) => input.residentId),
       ]);
       const opportunities = providerOpportunities.value.filter((opportunity) => opportunity.facility === facility);
@@ -1593,7 +2270,7 @@ const facilityIntelligenceSummaries = computed<FacilityIntelligenceSummary[]>(()
           !actionByOpportunityId.value.has(opportunity.id),
       ).length;
       const inputGaps = [
-        ...(readinessScore < 35 ? ["PCC/source coverage is thin for this facility"] : []),
+        ...(readinessScore < 35 ? ["Otangeles Notes+ source coverage is thin for this facility"] : []),
         ...(staffInputs.length === 0 ? ["No CNA/staff inputs captured yet"] : []),
         ...(providerInputs.length === 0 ? ["No provider inputs captured yet"] : []),
         ...(unassignedHighRisk ? [`${unassignedHighRisk} high-risk prediction${unassignedHighRisk === 1 ? "" : "s"} still need assigned action`] : []),
@@ -1613,7 +2290,7 @@ const facilityIntelligenceSummaries = computed<FacilityIntelligenceSummary[]>(()
         openActions: actionRequests.value.filter(
           (action) => action.facility === facility && action.status !== "completed",
         ).length,
-        pccEvents: pccEvents.length,
+        notesPlusEvents: notesPlusEvents.length,
         staffInputs: staffInputs.length,
         providerInputs: providerInputs.length,
         residentsCovered: coveredResidentIds.size,
@@ -1650,6 +2327,63 @@ const filteredProviderNotes = computed(() =>
 const activeProviderVisit = computed(() =>
   activeVisitId.value
     ? providerVisitsState.value.find((visit) => visit.id === activeVisitId.value) ?? null
+    : null,
+);
+const activeReviewEncounter = computed(() =>
+  activeReviewVisitId.value
+    ? providerVisitsState.value.find((visit) => visit.id === activeReviewVisitId.value) ?? null
+    : null,
+);
+const activeReviewResident = computed(() =>
+  activeReviewEncounter.value
+    ? residents.find((resident) => resident.id === activeReviewEncounter.value?.residentId) ?? null
+    : null,
+);
+const activeReviewOpenThreads = computed(() =>
+  activeReviewEncounter.value?.sections.flatMap((section) =>
+    section.revisionThreads.filter((thread) => thread.status === "open"),
+  ) ?? [],
+);
+const activeReviewHasOpenRevisions = computed(() => activeReviewOpenThreads.value.length > 0);
+const activeReviewAllVerified = computed(() =>
+  Boolean(activeReviewEncounter.value?.sections.length) &&
+  activeReviewEncounter.value!.sections.every((section) => section.verified),
+);
+const currentProviderSignature = computed(() => providerSignatures.value[activeStaffUser.value.id] ?? null);
+function encounterHasClinicalVisitMerit(encounter: ProviderVisit) {
+  return providerOpportunities.value.some(
+    (opportunity) => opportunity.residentId === encounter.residentId,
+  );
+}
+function encounterTimeSortValue(time: string) {
+  const match = time.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  let hours = Number(match[1]) % 12;
+  if (match[3].toUpperCase() === "PM") {
+    hours += 12;
+  }
+  return hours * 60 + Number(match[2]);
+}
+const dailyProviderEncounters = computed(() =>
+  fetchDailyEncountersFromNotesPlus()
+    .filter((encounter) =>
+      encounter.scheduledDate === todayDateKey() &&
+      (encounter.status === "scheduled" || encounter.status === "provider-in-progress") &&
+      encounter.providerUserId === activeStaffUser.value.id &&
+      encounterHasClinicalVisitMerit(encounter),
+    )
+    .filter((encounter) => {
+      const resident = residents.find((entry) => entry.id === encounter.residentId);
+      return !resident || selectedFacility.value === "all" || residentFacility(resident) === selectedFacility.value;
+    })
+    .slice()
+    .sort((a, b) => encounterTimeSortValue(a.scheduledTime) - encounterTimeSortValue(b.scheduledTime)),
+);
+const revisionModalSection = computed(() =>
+  revisionModalSectionId.value
+    ? activeReviewEncounter.value?.sections.find((section) => section.id === revisionModalSectionId.value) ?? null
     : null,
 );
 const activeVisitResident = computed(() =>
@@ -1862,7 +2596,7 @@ const scheduleDraftCanSave = computed(() => {
     return false;
   }
   if (scheduleDraft.value.type === "huddle") {
-    return true;
+    return Boolean(scheduleDraft.value.time);
   }
   if (scheduleDraft.value.type === "clinical-order") {
     return (
@@ -1888,12 +2622,12 @@ const scheduleModalCopy = computed(() => {
   }
   return {
     title: "Schedule Huddle",
-    description: "Schedule a resident care-team huddle in this resident's coordination thread.",
+    description: "Send a quick care-team invite into this resident's room.",
   };
 });
 const residentTabs = computed(() =>
   selectedRole.value === "provider"
-    ? baseResidentTabs
+    ? baseResidentTabs.map((tab) => (tab.key === "notes" ? { ...tab, label: "Encounter" } : tab))
     : baseResidentTabs.filter((tab) => tab.key !== "notes"),
 );
 const isMessagesView = computed(() =>
@@ -1906,21 +2640,24 @@ const messageHeader = computed(() => {
   if (selectedRole.value === "provider") {
     return {
       title: "Messages",
-      subtitle: "Messages, huddles, calls, and clinical discussions",
+      subtitle: "Resident rooms, care-team huddles, and staff conversations",
     };
   }
   if (selectedRole.value === "cna") {
     return {
       title: "Messages",
-      subtitle: "Charge nurse, unit manager, and DON communication",
+      subtitle: "Resident rooms, charge nurse updates, and team communication",
     };
   }
   return {
     title: "Messages",
-    subtitle: "Care team huddles and direct messages",
+    subtitle: "Resident care-team rooms and staff conversations",
   };
 });
 const profileHeader = computed(() => "Settings");
+const activeProfileDisplayName = computed(() =>
+  [activeProfile.value.firstName, activeProfile.value.lastName].filter(Boolean).join(" ").trim(),
+);
 const otangelesAccount = computed(() => ({
   status: "Connected",
   workspace: "Otangeles Notes+",
@@ -1928,12 +2665,12 @@ const otangelesAccount = computed(() => ({
   practiceAdmin: "Mara Whitlock",
   adminRole: "Practice Admin",
   adminContact: "mara.whitlock@otangelesnotes.local",
-  syncScope: "Visit drafts, clinical orders, huddle summaries, and escalation notes",
+  syncScope: "Encounter drafts, clinical orders, huddle summaries, and escalation notes",
 }));
 const profileMenuRoleLabel = computed(() => {
   if (selectedRole.value === "provider") {
     if (/medical doctor|doctor|attending|medical director/i.test(activeStaffUser.value.role)) {
-      return "Medical Doctor";
+      return "Physician";
     }
     if (/nurse practitioner|np/i.test(activeStaffUser.value.role)) {
       return "Nurse Practitioner";
@@ -1954,6 +2691,11 @@ const selectedResidentNotes = computed(() =>
 const encounterModalNote = computed(() =>
   encounterModalNoteId.value
     ? providerNotesState.value.find((note) => note.id === encounterModalNoteId.value) ?? null
+    : null,
+);
+const startEncounterResident = computed(() =>
+  startEncounterResidentId.value
+    ? residents.find((resident) => resident.id === startEncounterResidentId.value) ?? null
     : null,
 );
 const deleteProviderNoteTarget = computed(() =>
@@ -2001,6 +2743,16 @@ const selectedResidentOpportunity = computed(() =>
     ? providerOpportunities.value.find((opportunity) => opportunity.resident.id === selectedResident.value?.id) ?? null
     : null,
 );
+const selectedResidentEvidenceGroups = computed<ResidentProfileEvidenceGroup[]>(() =>
+  selectedResident.value
+    ? residentProfileEvidenceGroups(selectedResident.value, selectedResidentOpportunity.value)
+    : [],
+);
+const selectedResidentEvidenceSourceSummary = computed(() =>
+  selectedResidentEvidenceGroups.value.length
+    ? selectedResidentEvidenceGroups.value.map((group) => group.source).join(" + ")
+    : "No source evidence",
+);
 
 const decliningCount = computed(
   () =>
@@ -2024,14 +2776,156 @@ const groupedProviderResidents = computed(() =>
   })),
 );
 
-const visibleThreads = computed(() => [
-  ...createdThreads.value,
-  ...threads.filter((thread) => !createdThreads.value.some((created) => created.id === thread.id)),
-]);
+const visibleThreads = computed(() =>
+  [
+    ...createdThreads.value,
+    ...threads.filter((thread) => !createdThreads.value.some((created) => created.id === thread.id)),
+  ].filter((thread) => validThreadForCurrentUser(thread)),
+);
+
+const residentRoomThreads = computed(() => {
+  const existingRooms = new Map(
+    visibleThreads.value
+      .filter((thread) => thread.purpose === "resident-room" && Boolean(threadResident(thread)))
+      .map((thread) => [thread.residentId, thread]),
+  );
+
+  return residents
+    .filter((resident) => residentVisibleForRole(selectedRole.value, resident.id, residentFacility(resident)))
+    .map((resident) => existingRooms.get(resident.id) ?? residentRoomTemplate(resident))
+    .sort((a, b) => threadDisplayTitle(a).localeCompare(threadDisplayTitle(b)));
+});
+
+const searchedResidentRoomThreads = computed(() =>
+  residentRoomThreads.value.filter((thread) => threadMatchesSearch(thread, messageSearchQuery.value)),
+);
+
+const peopleThreads = computed(() =>
+  visibleThreads.value.filter((thread) => thread.purpose !== "resident-room"),
+);
+
+const searchedPeopleThreads = computed(() =>
+  peopleThreads.value.filter((thread) => threadMatchesSearch(thread, messageSearchQuery.value)),
+);
 
 const messageNavUnreadCount = computed(() =>
   visibleThreads.value.reduce((total, thread) => total + thread.unread, 0),
 );
+
+const roleRelevantOpenActions = computed(() => {
+  if (selectedRole.value === "provider") {
+    return providerActionRequests.value.filter((action) => action.status !== "completed");
+  }
+  if (selectedRole.value === "cna") {
+    return cnaActionRequests.value.filter((action) => action.status !== "completed");
+  }
+  return openActionRequests.value;
+});
+
+const roleVisibleEscalations = computed(() =>
+  hospitalEscalations.value.filter(
+    (escalation) => selectedFacility.value === "all" || escalation.facility === selectedFacility.value,
+  ),
+);
+
+const headerNotifications = computed<HeaderNotification[]>(() => {
+  const readIds = new Set(readNotificationIds.value);
+  const openActions = roleRelevantOpenActions.value.slice(0, 3).map((action) => {
+    const id = `action-${action.id}`;
+    return {
+      id,
+      tone: action.priority === "Stat" ? "danger" : action.priority === "High" ? "warning" : "neutral",
+      title: action.actionType,
+      detail: `${action.residentName} · ${action.instructions}`,
+      meta: action.dueTime,
+      icon: action.status === "flagged" ? AlertTriangle : CheckCircle,
+      target: { type: "action", action } as NotificationTarget,
+      unread: !readIds.has(id),
+    };
+  });
+
+  const todaysSchedule = visibleScheduleItems.value
+    .filter((item) => item.dateKey === todayDateKey())
+    .slice(0, 3)
+    .map((item) => {
+      const id = `schedule-${item.kind}-${item.id}`;
+      return {
+        id,
+        tone: scheduleItemTone(item),
+        title: item.title,
+        detail: item.detail,
+        meta: item.time,
+        icon: item.kind === "huddle" ? Users : item.kind === "escalation" ? AlertTriangle : CalendarDays,
+        target: { type: "schedule", item } as NotificationTarget,
+        unread: !readIds.has(id),
+      };
+    });
+
+  const providerAlerts =
+    selectedRole.value === "provider"
+      ? filteredProviderOpportunities.value.slice(0, 2).map((opportunity) => {
+          const id = `opportunity-${opportunity.id}`;
+          return {
+            id,
+            tone: opportunity.urgency === "urgent" ? "danger" : opportunity.urgency === "high" ? "warning" : "neutral",
+            title: opportunity.resident.name,
+            detail: opportunity.reason,
+            meta: opportunity.category,
+            icon: Activity,
+            target: { type: "resident", residentId: opportunity.resident.id } as NotificationTarget,
+            unread: !readIds.has(id),
+          };
+        })
+      : [];
+
+  const encounterReviewAlerts =
+    selectedRole.value === "provider"
+      ? providerVisitsState.value
+          .filter(
+            (encounter) =>
+              encounter.providerUserId === activeStaffUser.value.id && encounter.status === "needs-review",
+          )
+          .slice(0, 3)
+          .map((encounter) => {
+            const id = `encounter-review-${encounter.id}`;
+            return {
+              id,
+              tone: "warning",
+              title: `${encounter.residentName} is ready for review`,
+              detail: `${encounter.visitType} encounter completed by ${encounter.assignedScribe ?? "the assigned scribe"}.`,
+              meta: "Needs Review",
+              icon: FileText,
+              target: {
+                type: "encounter",
+                encounterId: encounter.id,
+                residentId: encounter.residentId,
+              } as NotificationTarget,
+              unread: !readIds.has(id),
+            };
+          })
+      : [];
+
+  const escalationAlerts =
+    selectedRole.value === "don"
+      ? roleVisibleEscalations.value.slice(0, 2).map((escalation) => {
+          const id = `escalation-${escalation.id}`;
+          return {
+            id,
+            tone: escalation.urgency === "Stat" ? "danger" : "warning",
+            title: escalation.residentName,
+            detail: escalation.reason,
+            meta: escalation.status.replaceAll("-", " "),
+            icon: AlertTriangle,
+            target: { type: "escalation", residentId: escalation.residentId } as NotificationTarget,
+            unread: !readIds.has(id),
+          };
+        })
+      : [];
+
+  return [...encounterReviewAlerts, ...providerAlerts, ...escalationAlerts, ...openActions, ...todaysSchedule].slice(0, 8);
+});
+
+const headerNotificationCount = computed(() => headerNotifications.value.filter((notification) => notification.unread).length);
 
 function isMessagesNavView(view: ViewName) {
   return view === "messages" || view === "provider-collaboration" || view === "cna-messages";
@@ -2062,7 +2956,8 @@ const selectedThread = computed<Thread | null>(() => {
       id: selectedThreadId.value,
       kind: "dm",
       title: user.name,
-      members: ["me", user.id],
+      members: uniqueIds([activeStaffUser.value.id, user.id]),
+      purpose: "direct",
       lastMessage: "",
       lastTs: "now",
       unread: 0,
@@ -2073,6 +2968,356 @@ const selectedThread = computed<Thread | null>(() => {
   return null;
 });
 
+function normalizeActorId(userId: string) {
+  return userId === "me" ? defaultLoginUserIds.don : userId;
+}
+
+function isCurrentUser(authorId: string) {
+  return normalizeActorId(authorId) === activeStaffUser.value.id;
+}
+
+function directThreadPeer(thread: Thread) {
+  if (thread.kind !== "dm") {
+    return null;
+  }
+  return thread.members
+    .map((member) => normalizeActorId(member))
+    .find((member) => member !== activeStaffUser.value.id) ?? null;
+}
+
+function threadResident(thread: Thread) {
+  return thread.residentId
+    ? residents.find((resident) => resident.id === thread.residentId) ?? null
+    : null;
+}
+
+function threadDisplayTitle(thread: Thread) {
+  const resident = threadResident(thread);
+  if (resident && thread.purpose === "resident-room") {
+    return `${resident.name} Care Team`;
+  }
+  if (thread.kind === "dm") {
+    const peerId = directThreadPeer(thread);
+    return peerId ? userName(peerId) : thread.title;
+  }
+  return thread.title;
+}
+
+function threadSubtitle(thread: Thread) {
+  const resident = threadResident(thread);
+  if (resident) {
+    return `Room ${resident.room} · ${resident.latest}`;
+  }
+  if (thread.kind === "dm") {
+    const peerId = directThreadPeer(thread);
+    return peerId ? `${normalizeSystemRole(userRoleLabel(peerId))} · Direct message` : "Direct message";
+  }
+  return `${thread.members.length} members · Staff group`;
+}
+
+function threadParticipantSummary(thread: Thread) {
+  const members = thread.members
+    .map((member) => normalizeActorId(member))
+    .filter((member, index, list) => list.indexOf(member) === index);
+  const otherMembers = members.filter((member) => member !== activeStaffUser.value.id);
+  const names = otherMembers.slice(0, 3).map((member) => userName(member));
+  const extra = Math.max(0, otherMembers.length - names.length);
+  return extra ? `${names.join(", ")} +${extra}` : names.join(", ");
+}
+
+function threadMatchesSearch(thread: Thread, rawQuery: string) {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) {
+    return true;
+  }
+
+  const resident = threadResident(thread);
+  if (resident && residentMatchesSearch(resident, query)) {
+    return true;
+  }
+
+  const memberDetails = thread.members.map((member) => {
+    const userId = normalizeActorId(member);
+    return `${userName(userId)} ${userRoleLabel(userId)}`;
+  });
+
+  return [
+    threadDisplayTitle(thread),
+    threadSubtitle(thread),
+    threadParticipantSummary(thread),
+    thread.lastMessage,
+    ...memberDetails,
+    ...thread.messages.map((message) => `${authorName(message.authorId)} ${message.text}`),
+  ]
+    .join(" ")
+    .toLowerCase()
+    .includes(query);
+}
+
+function threadSearchMessagePreview(thread: Thread, rawQuery: string) {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) {
+    return null;
+  }
+
+  const matchingMessage = [...thread.messages]
+    .reverse()
+    .find((message) =>
+      `${authorName(message.authorId)} ${message.text} ${message.ts}`.toLowerCase().includes(query),
+    );
+
+  return matchingMessage
+    ? `Message match · ${authorName(matchingMessage.authorId)}: ${matchingMessage.text}`
+    : null;
+}
+
+const threadUtilityResident = computed(() => {
+  const thread = selectedThread.value;
+  return thread ? threadResident(thread) : null;
+});
+
+const threadUtilityParticipantNames = computed(() => {
+  const thread = selectedThread.value;
+  if (!thread) {
+    return [];
+  }
+  return thread.members
+    .map((member) => normalizeActorId(member))
+    .filter((member, index, list) => list.indexOf(member) === index)
+    .map((member) => userName(member));
+});
+
+const threadUtilityLatestMessages = computed(() =>
+  threadMessages.value.filter((message) => !message.kind).slice(-4),
+);
+
+const threadUtilityCallMessage = computed(() => {
+  if (threadUtilityMessageId.value) {
+    return threadMessages.value.find((message) => message.id === threadUtilityMessageId.value) ?? null;
+  }
+  return threadMessages.value.filter((message) => message.kind === "voice-call" || message.kind === "video-call").slice(-1)[0] ?? null;
+});
+
+const threadUtilityTitle = computed(() => {
+  if (threadUtilityModal.value === "summary") {
+    return "Thread Summary";
+  }
+  if (threadUtilityModal.value === "insight") {
+    return "Thread Insight";
+  }
+  return "Call Transcription";
+});
+
+const threadUtilityIntro = computed(() => {
+  const thread = selectedThread.value;
+  if (!thread) {
+    return "";
+  }
+  if (threadUtilityModal.value === "summary") {
+    return `Current summary for ${threadDisplayTitle(thread)} based on the latest visible messages.`;
+  }
+  if (threadUtilityModal.value === "insight") {
+    return `Care-team signal detected from ${threadDisplayTitle(thread)} and resident context.`;
+  }
+  const call = threadUtilityCallMessage.value;
+  return call
+    ? `${call.kind === "video-call" ? "Video" : "Voice"} call captured at ${call.ts}${call.duration ? ` for ${call.duration}` : ""}.`
+    : "No call transcription is available for this thread yet.";
+});
+
+const threadSummaryPoints = computed(() => {
+  const thread = selectedThread.value;
+  if (!thread) {
+    return [];
+  }
+  const resident = threadResident(thread);
+  const latest = threadUtilityLatestMessages.value[threadUtilityLatestMessages.value.length - 1];
+  const calls = threadMessages.value.filter((message) => message.kind === "voice-call" || message.kind === "video-call");
+  return [
+    `${threadDisplayTitle(thread)} includes ${thread.members.length} member${thread.members.length === 1 ? "" : "s"}${threadParticipantSummary(thread) ? `: ${threadParticipantSummary(thread)}` : ""}.`,
+    resident
+      ? `Resident context: Room ${resident.room}; ${resident.latest}.`
+      : `Conversation context: ${thread.kind === "huddle" ? "staff group" : "direct message"}.`,
+    latest ? `Latest written update: ${latest.text}` : "No written updates have been posted yet.",
+    calls.length
+      ? `${calls.length} call session${calls.length === 1 ? "" : "s"} logged in this thread.`
+      : "No voice or video calls logged in this thread yet.",
+  ];
+});
+
+const threadInsightPoints = computed(() => {
+  const thread = selectedThread.value;
+  if (!thread) {
+    return [];
+  }
+  const resident = threadResident(thread);
+  if (!resident) {
+    return [
+      "Most useful next step: convert the latest staff decision into an assigned action if ownership is unclear.",
+      `Participants active in this thread: ${threadUtilityParticipantNames.value.join(", ") || "care team"}.`,
+      "Keep care-team decisions in the group thread so follow-up is easier to audit.",
+    ];
+  }
+  const abnormalVitals = resident.situation.vitals.filter((vital) => vital.isAbnormal || vital.isCritical);
+  const focus = residentRoomFocus(resident);
+  return [
+    `${resident.name}'s active focus is ${focus}.`,
+    abnormalVitals.length
+      ? `Vitals needing visibility: ${abnormalVitals.map((vital) => `${vital.label} ${vital.current}`).join(", ")}.`
+      : "Vitals are not currently flagged as abnormal.",
+    resident.situation.concerns.length
+      ? `Open concern status: ${resident.situation.concerns.map((concern) => `${concern.title} ${concern.status}`).join(", ")}.`
+      : "No unresolved concern is listed for this resident right now.",
+    `Recommended next step: keep updates in Room ${resident.room}'s care-team thread and confirm any provider-facing decision before shift handoff.`,
+  ];
+});
+
+const threadTranscriptionLines = computed(() => {
+  const call = threadUtilityCallMessage.value;
+  const thread = selectedThread.value;
+  if (!call || !thread) {
+    return [];
+  }
+  const resident = threadResident(thread);
+  const focus = resident ? residentRoomFocus(resident) : threadDisplayTitle(thread);
+  return [
+    `${authorName(call.authorId)} opened the ${call.kind === "video-call" ? "video" : "voice"} call at ${call.ts}.`,
+    resident
+      ? `Team reviewed ${resident.name} in Room ${resident.room}: ${resident.latest}.`
+      : `Team reviewed the latest updates in ${threadDisplayTitle(thread)}.`,
+    `Primary discussion point: ${focus}.`,
+    resident
+      ? `Follow-up: document changes in the resident room and route decisions to Otangeles Notes+ when provider orders are finalized.`
+      : "Follow-up: capture owners for any decision that needs action after the call.",
+  ];
+});
+
+function canRenameThread(thread: Thread) {
+  return (
+    thread.kind === "huddle" &&
+    (thread.purpose === "resident-room" || thread.purpose === "staff-group")
+  );
+}
+
+function validThreadForCurrentUser(thread: Thread) {
+  const memberIds = thread.members.map((member) => normalizeActorId(member));
+  const resident = threadResident(thread);
+  if (resident) {
+    return residentVisibleForRole(selectedRole.value, resident.id, residentFacility(resident));
+  }
+  if (thread.kind === "dm") {
+    return memberIds.includes(activeStaffUser.value.id) && Boolean(directThreadPeer(thread));
+  }
+  return memberIds.includes(activeStaffUser.value.id);
+}
+
+function residentRoomThreadId(resident: Resident) {
+  return (
+    visibleThreads.value.find(
+      (thread) => thread.purpose === "resident-room" && thread.residentId === resident.id,
+    )?.id ?? `resident-thread-${resident.id}`
+  );
+}
+
+function residentRoomCareTeamIds(resident: Resident) {
+  const index = Number.parseInt(resident.id, 10) || 0;
+  return {
+    provider: providerRecipientIds[index % Math.max(providerRecipientIds.length, 1)] ?? providerRecipientIds[0] ?? "u4",
+    charge: index % 2 === 0 ? "u2" : "u1",
+    cna: index % 3 === 0 ? "u11" : "u3",
+  };
+}
+
+function residentRoomMemberIds(resident: Resident) {
+  const team = residentRoomCareTeamIds(resident);
+  return uniqueIds([
+    activeStaffUser.value.id,
+    team.provider,
+    team.charge,
+    team.cna,
+    "u15",
+  ]);
+}
+
+function residentRoomFocus(resident: Resident) {
+  return resident.situation.concerns[0]?.title ?? resident.latest;
+}
+
+function residentRoomVitalSummary(resident: Resident) {
+  const vital = resident.situation.vitals.find((entry) => entry.isCritical || entry.isAbnormal) ?? resident.situation.vitals[0];
+  if (!vital) {
+    return "Vitals are at baseline";
+  }
+  return `${vital.label} ${vital.current}${vital.base ? `, baseline ${vital.base}` : ""}`;
+}
+
+function residentRoomConversation(resident: Resident): ThreadMessage[] {
+  const team = residentRoomCareTeamIds(resident);
+  const summarySentence = resident.situation.summary.split(".")[0] || resident.latest;
+  const focus = residentRoomFocus(resident);
+  const plan =
+    resident.situation.concerns.length > 0
+      ? `Plan: keep watching ${focus.toLowerCase()}, document response to care, and escalate if vitals or mentation change.`
+      : "Plan: continue routine monitoring, document ADL response, and post any change from baseline here.";
+
+  return [
+    {
+      id: `room-${resident.id}-m1`,
+      authorId: team.charge,
+      text: `Room ${resident.room} check-in: ${resident.latest}. Keeping this room current for nursing, provider, and scheduling updates.`,
+      ts: "7:12 AM",
+    },
+    {
+      id: `room-${resident.id}-m2`,
+      authorId: team.cna,
+      text: `Morning care update: ${summarySentence}. I will add intake, mobility, and comfort changes after the next round.`,
+      ts: "7:28 AM",
+    },
+    {
+      id: `room-${resident.id}-m3`,
+      authorId: team.provider,
+      text: `${residentRoomVitalSummary(resident)}. Please keep the trend visible here before the next provider review.`,
+      ts: "7:46 AM",
+    },
+    {
+      id: `room-${resident.id}-m4`,
+      authorId: activeStaffUser.value.id,
+      text: plan,
+      ts: "8:05 AM",
+    },
+  ];
+}
+
+function residentRoomTemplate(resident: Resident): Thread {
+  const messages = residentRoomConversation(resident);
+  const lastMessage = messages[messages.length - 1];
+  return {
+    id: residentRoomThreadId(resident),
+    kind: "huddle",
+    purpose: "resident-room",
+    residentId: resident.id,
+    title: `${resident.name} Care Team`,
+    members: residentRoomMemberIds(resident),
+    lastMessage: `${authorName(lastMessage.authorId)}: ${lastMessage.text}`,
+    lastTs: lastMessage.ts,
+    unread: 0,
+    messages,
+  };
+}
+
+function residentRoomFor(resident: Resident) {
+  const existingThread = visibleThreads.value.find(
+    (thread) => thread.purpose === "resident-room" && thread.residentId === resident.id,
+  );
+  if (existingThread) {
+    return existingThread;
+  }
+
+  const thread = residentRoomTemplate(resident);
+  createLocalThread(thread);
+  return thread;
+}
+
 const sortedUsers = computed(() => {
   const order = { online: 0, away: 1, offline: 2 };
   return users
@@ -2080,6 +3325,9 @@ const sortedUsers = computed(() => {
     .slice()
     .sort((a, b) => order[a.presence] - order[b.presence]);
 });
+const searchedMessageUsers = computed(() =>
+  sortedUsers.value.filter((user) => staffMatchesSearch(user, messageSearchQuery.value)),
+);
 const clinicalRecipients = computed(() =>
   users.filter((user) => clinicalRecipientIds.includes(user.id) && user.id !== activeStaffUser.value.id),
 );
@@ -2136,7 +3384,7 @@ const roleSelectOptions = computed<SelectOption[]>(() =>
   Object.values(roleProfiles).map((role) => selectOption(role.key, role.label)),
 );
 const loginStaffSelectOptions = computed<SelectOption[]>(() =>
-  loginStaffOptions.value.map((user) => selectOption(user.id, `${user.name} · ${user.role}`)),
+  loginStaffOptions.value.map((user) => selectOption(user.id, `${user.name} · ${normalizeSystemRole(user.role)}`)),
 );
 const facilitySelectOptions = computed<SelectOption[]>(() =>
   facilityOptions.value.map((facility) => selectOption(facility, facilityOptionLabel(facility))),
@@ -2170,7 +3418,7 @@ const actionRoleSelectOptions: SelectOption[] = [
   selectOption("cna", "CNA"),
 ];
 const actionAssigneeSelectOptions = computed<SelectOption[]>(() =>
-  actionAssigneeOptions.value.map((user) => selectOption(user.id, `${user.name} · ${user.role}`)),
+  actionAssigneeOptions.value.map((user) => selectOption(user.id, `${user.name} · ${normalizeSystemRole(user.role)}`)),
 );
 const actionTypeSelectOptions = computed<SelectOption[]>(() =>
   actionTypeOptions.value.map((actionType) => selectOption(actionType)),
@@ -2385,6 +3633,7 @@ function setSelectedLoginUser(userId: string) {
 }
 
 function setSelectedFacility(facility: FacilitySelection | string) {
+  closeFloatingMenus();
   const options = facilityOptions.value;
   const next = options.includes(facility as FacilitySelection)
     ? (facility as FacilitySelection)
@@ -2477,10 +3726,11 @@ function openExternalResource(label: string) {
 }
 
 function userName(userId: string) {
-  if (userId === activeStaffUser.value.id || userId === "me") {
+  const normalizedUserId = normalizeActorId(userId);
+  if (normalizedUserId === activeStaffUser.value.id) {
     return activeStaffUser.value.name;
   }
-  return getUser(userId)?.name ?? careUserById(userId)?.name ?? "Care team";
+  return getUser(normalizedUserId)?.name ?? careUserById(normalizedUserId)?.name ?? "Care team";
 }
 
 function actionAssigneeName(action: ActionRequest) {
@@ -2649,10 +3899,11 @@ function focusItemFromEscalation(escalation: HospitalEscalation): FocusItem {
 }
 
 function userRoleLabel(userId: string) {
-  if (userId === activeStaffUser.value.id || userId === "me") {
+  const normalizedUserId = normalizeActorId(userId);
+  if (normalizedUserId === activeStaffUser.value.id) {
     return activeStaffUser.value.role;
   }
-  return getUser(userId)?.role ?? careUserById(userId)?.role ?? "Care team";
+  return getUser(normalizedUserId)?.role ?? careUserById(normalizedUserId)?.role ?? "Care team";
 }
 
 function taggedStaffNames(userIds: string[]) {
@@ -2664,8 +3915,36 @@ function assignmentSummary(primaryOwnerId: string, taggedUserIds: string[] = [])
   return tagged ? `Owner: ${userName(primaryOwnerId)} · Tagged: ${tagged}` : `Owner: ${userName(primaryOwnerId)}`;
 }
 
+function huddleInviteSummary(primaryOwnerId: string, taggedUserIds: string[] = []) {
+  const tagged = taggedStaffNames(taggedUserIds);
+  return tagged ? `Organizer: ${userName(primaryOwnerId)} · Invitees: ${tagged}` : `Organizer: ${userName(primaryOwnerId)}`;
+}
+
 function residentTag(resident: Resident) {
   return `@${resident.name}`;
+}
+
+function huddleThreadMentionsResident(thread: Thread, resident: Resident) {
+  const haystack = [
+    thread.title,
+    thread.lastMessage,
+    ...thread.messages.map((message) => message.text),
+  ]
+    .join(" ")
+    .toLowerCase();
+  const residentName = resident.name.toLowerCase();
+  return haystack.includes(residentName) || haystack.includes(residentTag(resident).toLowerCase());
+}
+
+function uniqueThreadList(threadList: Thread[]) {
+  const seen = new Set<string>();
+  return threadList.filter((thread) => {
+    if (seen.has(thread.id)) {
+      return false;
+    }
+    seen.add(thread.id);
+    return true;
+  });
 }
 
 function opportunitySourceSummary(opportunity: ProviderOpportunity) {
@@ -2692,7 +3971,7 @@ function facilitySourceCoverageText(summary: FacilityIntelligenceSummary) {
 }
 
 function facilitySourceMixText(summary: FacilityIntelligenceSummary) {
-  return `PCC ${summary.pccEvents} · Staff ${summary.staffInputs} · Provider ${summary.providerInputs}`;
+  return `Otangeles Notes+ ${summary.notesPlusEvents} · Staff ${summary.staffInputs} · Provider ${summary.providerInputs}`;
 }
 
 function facilityInputGapText(summary: FacilityIntelligenceSummary) {
@@ -2739,6 +4018,41 @@ function opportunityEvidenceText(event: ResidentSourceEvent) {
   return `${event.source} · ${opportunityEvidenceItemText(event)}`;
 }
 
+function residentProfileEvidenceGroups(
+  resident: Resident,
+  opportunity: ProviderOpportunity | null,
+): ResidentProfileEvidenceGroup[] {
+  if (opportunity) {
+    return opportunityEvidenceGroups(opportunity).map((group) => ({
+      source: group.source,
+      items: group.events.map((event) => opportunityEvidenceItemText(event)),
+    }));
+  }
+
+  return [
+    {
+      source: "Resident chart",
+      items: [
+        `Current summary - ${resident.situation.summary}`,
+        `Clinical memory - ${resident.situation.memory}`,
+        `Latest status - ${resident.latest}`,
+      ],
+    },
+    {
+      source: "Vitals",
+      items: resident.situation.vitals.map(
+        (vital) => `${vital.label}: ${vital.current} vs baseline ${vital.base}`,
+      ),
+    },
+    {
+      source: "Unresolved concerns",
+      items: resident.situation.concerns.map(
+        (concern) => `${concern.title} - ${concern.status}`,
+      ),
+    },
+  ].filter((group) => group.items.length);
+}
+
 function actionResident(action: ActionRequest) {
   return residents.find((resident) => resident.id === action.residentId) ?? null;
 }
@@ -2758,6 +4072,10 @@ function assignImmediateActionFromRequest(action: ActionRequest) {
 }
 
 function actionSourceResidentFromThread() {
+  const resident = selectedThread.value ? threadResident(selectedThread.value) : null;
+  if (resident) {
+    return resident;
+  }
   const text = threadMessages.value.map((message) => message.text).join(" ");
   return residents.find((resident) => text.includes(resident.name)) ?? activeSituationResident.value ?? filteredResidents.value[0];
 }
@@ -2849,7 +4167,7 @@ function scheduleItemsForRole(role: RoleKey): ResidentScheduleItem[] {
     primaryOwnerId: huddle.primaryOwnerId,
     taggedUserIds: [...huddle.taggedUserIds],
     title: huddle.title,
-    detail: `${huddle.eventType} · ${huddle.residentName} · ${huddle.duration} · ${assignmentSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}`,
+    detail: `${huddle.eventType} · ${huddle.residentName} · ${huddle.duration} · ${huddleInviteSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}`,
     dateKey: huddle.scheduledDate || scheduleDateKeyFromText(huddle.scheduledFor),
     time: formatDateTimeLabel(huddle.scheduledDate || scheduleDateKeyFromText(huddle.scheduledFor), huddle.scheduledTime),
     timeLabel: huddle.scheduledTime ? formatTimeInput(huddle.scheduledTime) : scheduleTimeLabelFromText(huddle.scheduledFor),
@@ -3084,15 +4402,15 @@ function timelineEventsForResident(resident: Resident) {
       kind: "visit",
       sourceId: visit.id,
       timeAgo: visit.endedAt ?? visit.startedAt,
-      period: "Provider visit",
+      period: "Provider encounter",
       icon: "file-text",
-      title: `${visit.visitType} visit`,
-      text: `${visit.providerName} · ${sourceLabel}. ${summary ? timelineSummary(summary) : "Visit note in progress."}`,
+      title: `${visit.visitType} encounter`,
+      text: `${visit.providerName} · ${sourceLabel}. ${summary ? timelineSummary(summary) : "Encounter note in progress."}`,
       interpretation: orderCount
-        ? `${visitOrderSummary(visit)} linked to this visit.`
+        ? `${visitOrderSummary(visit)} linked to this encounter.`
         : undefined,
-      status: providerVisitStatusLabel(visit.status),
-      tone: statusTone(visit.status),
+      status: providerVisitStatusLabel(visit),
+      tone: statusTone(providerVisitStatusLabel(visit)),
       sortOrder: timelineSortFromLabel(visit.endedAt ?? visit.startedAt, 345000 - index),
     });
   });
@@ -3178,7 +4496,7 @@ function timelineEventsForResident(resident: Resident) {
       icon: "users",
       title: huddle.title,
       text: `Huddle ${huddle.status}: ${timelineSummary(huddle.agenda)}`,
-      interpretation: `${huddle.scheduledFor} · ${assignmentSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}`,
+      interpretation: `${huddle.scheduledFor} · ${huddleInviteSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}`,
       status: huddle.status,
       tone: statusTone(huddle.status),
       sortOrder: timelineSortFromLabel(huddle.createdAt, 310000 - index),
@@ -3307,7 +4625,7 @@ function careUpdatesForResident(residentId: string) {
       label: "Huddle Update",
       title: `${huddle.eventType} huddle scheduled`,
       body: "Care-team huddle added to Orders & Follow-ups.",
-      meta: `${huddle.scheduledFor} · ${assignmentSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}`,
+      meta: `${huddle.scheduledFor} · ${huddleInviteSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}`,
       status: huddle.status,
       tone: statusTone(huddle.status),
       sortOrder: 5000 - index,
@@ -3369,6 +4687,24 @@ function formatDateLabel(dateKey: string) {
     return "Tomorrow";
   }
   return dateFromKey(dateKey).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function formatDocumentDate(dateKey: string) {
+  return dateFromKey(dateKey).toLocaleDateString([], {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+  });
+}
+
+function mockResidentDateOfBirth(resident: Resident) {
+  // TODO(NOTES_PLUS): Replace this derived mock DOB with the resident demographic value received with the encounter.
+  const birthYear = new Date().getFullYear() - resident.age;
+  return new Date(birthYear, 0, 15).toLocaleDateString([], {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+  });
 }
 
 function formatTimeInput(time: string) {
@@ -3473,7 +4809,7 @@ function openScheduleThread(threadId: string) {
     return;
   }
   setView(roleMessagesView());
-  messageTab.value = "threads";
+  messageTab.value = "rooms";
   openThread(thread);
 }
 
@@ -3621,35 +4957,22 @@ function createScheduleFollowUp() {
 }
 
 function createOrderContextThread(order: ClinicalOrder) {
-  const recipientIds = uniqueIds([order.primaryOwnerId, ...order.taggedUserIds, "u1", "u2"]).filter(
-    (id) => id !== activeStaffUser.value.id,
-  );
+  const recipientIds = uniqueIds([order.primaryOwnerId, ...order.taggedUserIds, "u1", "u2"]);
   const resident = residents.find((entry) => entry.id === order.residentId) ?? residents[0];
+  const thread = ensureResidentCoordinationThread(resident, recipientIds);
   const text = `Provider order placed: ${residentTag(resident)} - ${order.eventType}. ${order.indication}`;
-  const thread: Thread = {
-    id: `order-thread-${Date.now()}`,
-    kind: "huddle",
-    title: `${order.residentName} · ${order.eventType} order`,
-    members: ["me", ...recipientIds],
-    lastMessage: text,
-    lastTs: "now",
-    unread: 0,
-    messages: [
-      {
-        id: `m-${Date.now()}`,
-        authorId: "me",
-        text,
-        ts: "now",
-      },
-      {
-        id: `m-${Date.now()}-details`,
-        authorId: "me",
-        text: `${assignmentSummary(order.primaryOwnerId, order.taggedUserIds)}. Details: ${order.details}. Instructions: ${order.instructions}`,
-        ts: "now",
-      },
-    ],
-  };
-  createLocalThread(thread);
+  appendThreadMessage(thread.id, {
+    id: `m-${Date.now()}`,
+    authorId: activeStaffUser.value.id,
+    text,
+    ts: "now",
+  });
+  appendThreadMessage(thread.id, {
+    id: `m-${Date.now()}-details`,
+    authorId: activeStaffUser.value.id,
+    text: `${assignmentSummary(order.primaryOwnerId, order.taggedUserIds)}. Details: ${order.details}. Instructions: ${order.instructions}`,
+    ts: "now",
+  });
   return thread.id;
 }
 
@@ -3738,34 +5061,21 @@ function closeEscalationModal() {
 }
 
 function createHospitalEscalationThread(escalation: HospitalEscalation, resident: Resident) {
-  const recipientIds = uniqueIds([providerRecipientIds[0] ?? "u4", providerRecipientIds[1] ?? "", "u1", "u2"]).filter(
-    (id) => id !== activeStaffUser.value.id,
-  );
+  const recipientIds = uniqueIds([providerRecipientIds[0] ?? "u4", providerRecipientIds[1] ?? "", "u1", "u2"]);
+  const thread = ensureResidentCoordinationThread(resident, recipientIds);
   const text = `Hospital transfer escalation initiated: ${residentTag(resident)} - ${escalation.reason}. Destination: ${escalation.destination}.`;
-  const thread: Thread = {
-    id: `hospital-thread-${Date.now()}`,
-    kind: "huddle",
-    title: `${resident.name} · hospital transfer`,
-    members: ["me", ...recipientIds],
-    lastMessage: text,
-    lastTs: "now",
-    unread: 0,
-    messages: [
-      {
-        id: `m-${Date.now()}`,
-        authorId: "me",
-        text,
-        ts: "now",
-      },
-      {
-        id: `m-${Date.now()}-followup`,
-        authorId: "me",
-        text: `Follow-up scheduled: ${escalation.followUpTime || "Not set"}. Notes: ${escalation.notes || "No additional notes."}`,
-        ts: "now",
-      },
-    ],
-  };
-  createLocalThread(thread);
+  appendThreadMessage(thread.id, {
+    id: `m-${Date.now()}`,
+    authorId: activeStaffUser.value.id,
+    text,
+    ts: "now",
+  });
+  appendThreadMessage(thread.id, {
+    id: `m-${Date.now()}-followup`,
+    authorId: activeStaffUser.value.id,
+    text: `Follow-up scheduled: ${escalation.followUpTime || "Not set"}. Notes: ${escalation.notes || "No additional notes."}`,
+    ts: "now",
+  });
   return thread.id;
 }
 
@@ -3827,49 +5137,54 @@ function openHuddleModal(resident: Resident) {
 }
 
 function residentCoordinationThreadId(resident: Resident) {
-  const existingResidentHuddle = scheduledHuddles.value.find(
-    (huddle) =>
-      huddle.residentId === resident.id &&
-      visibleThreads.value.some((thread) => thread.id === huddle.threadId && thread.kind === "huddle"),
-  );
-  return existingResidentHuddle?.threadId ?? `resident-thread-${resident.id}`;
+  return residentRoomThreadId(resident);
 }
 
 function ensureResidentCoordinationThread(resident: Resident, participantIds: string[]) {
-  const threadId = residentCoordinationThreadId(resident);
-  const existingThread = visibleThreads.value.find((thread) => thread.id === threadId);
+  const existingThread = residentRoomFor(resident);
   const members = uniqueIds([
-    "me",
-    ...(existingThread?.members ?? []),
-    ...participantIds.filter((id) => id !== activeStaffUser.value.id),
+    activeStaffUser.value.id,
+    ...existingThread.members.map((member) => normalizeActorId(member)),
+    ...participantIds,
   ]);
-  const thread: Thread = existingThread
-    ? {
-        ...existingThread,
-        kind: "huddle",
-        members,
-      }
-    : {
-        id: threadId,
-        kind: "huddle",
-        title: `${resident.name} care team`,
-        members,
-        lastMessage: `Care-team coordination for ${residentTag(resident)}.`,
-        lastTs: "now",
-        unread: 0,
-        messages: [],
-      };
+  const thread: Thread = {
+    ...existingThread,
+    kind: "huddle",
+    purpose: "resident-room",
+    residentId: resident.id,
+    title: `${resident.name} Care Team`,
+    members,
+  };
   createLocalThread(thread);
   return thread;
+}
+
+function prepareExistingHuddleThread(thread: Thread, participantIds: string[]) {
+  const members = uniqueIds([
+    activeStaffUser.value.id,
+    ...thread.members.map((member) => normalizeActorId(member)),
+    ...participantIds,
+  ]);
+  const updatedThread: Thread = {
+    ...thread,
+    kind: "huddle",
+    purpose: thread.purpose ?? "staff-group",
+    members,
+  };
+  createLocalThread(updatedThread);
+  return updatedThread;
 }
 
 function createScheduledHuddleThread(huddle: ScheduledHuddle, startNow: boolean) {
   const resident = residents.find((entry) => entry.id === huddle.residentId) ?? residents[0];
   const thread = ensureResidentCoordinationThread(resident, huddle.participantIds);
-  const message = `Scheduled ${huddle.eventType}: ${residentTag(resident)} - ${huddle.title} at ${huddle.scheduledFor}. ${assignmentSummary(huddle.primaryOwnerId, huddle.taggedUserIds)}. Agenda: ${huddle.agenda}`;
+  const invitees = taggedStaffNames(huddle.taggedUserIds);
+  const message = `${userName(huddle.primaryOwnerId)} scheduled a ${huddle.eventType.toLowerCase()} for ${resident.name} at ${huddle.scheduledFor}. ${
+    invitees ? `Invitees: ${invitees}. ` : ""
+  }Purpose: ${huddle.agenda}`;
   appendThreadMessage(thread.id, {
     id: `huddle-${huddle.id}`,
-    authorId: "me",
+    authorId: activeStaffUser.value.id,
     text: message,
     ts: "now",
   });
@@ -3914,7 +5229,7 @@ function saveScheduledHuddleFromScheduleDraft(startNow = false) {
 
   if (startNow) {
     setView(roleMessagesView());
-    messageTab.value = "threads";
+    messageTab.value = "rooms";
     openThread(thread);
   }
 }
@@ -4165,7 +5480,7 @@ function updateClinicalOrderStatus(order: ClinicalOrder, status: ClinicalOrderSt
   if (order.linkedThreadId) {
     appendThreadMessage(order.linkedThreadId, {
       id: `order-status-${Date.now()}`,
-      authorId: "me",
+      authorId: activeStaffUser.value.id,
       text: `${order.residentName} ${order.orderType} order marked ${status.replaceAll("-", " ")} in the shared care plan.`,
       ts: now,
     });
@@ -4203,35 +5518,24 @@ function sendTaggedCareMessage() {
     return;
   }
 
-  const recipients = users.filter((user) => context.recipientIds.includes(user.id));
+  const recipientIds = uniqueIds(context.recipientIds);
   const body = context.body.trim() || `${residentTag(resident)} - please review.`;
-  const thread: Thread = {
-    id: `tagged-${Date.now()}`,
-    kind: "huddle",
-    title: `${resident.name} · care team`,
-    members: ["me", ...recipients.map((user) => user.id)],
-    lastMessage: body,
-    lastTs: "now",
-    unread: 0,
-    messages: [
-      {
-        id: `m-${Date.now()}`,
-        authorId: "me",
-        text: body,
-        ts: "now",
-      },
-      {
-        id: `m-${Date.now()}-context`,
-        authorId: "me",
-        text: `Context: ${opportunity?.category ?? "Resident update"} · ${opportunity?.changes.join("; ") ?? resident.latest}`,
-        ts: "now",
-      },
-    ],
-  };
-  createLocalThread(thread);
+  const thread = ensureResidentCoordinationThread(resident, recipientIds);
+  appendThreadMessage(thread.id, {
+    id: `m-${Date.now()}`,
+    authorId: activeStaffUser.value.id,
+    text: body,
+    ts: "now",
+  });
+  appendThreadMessage(thread.id, {
+    id: `m-${Date.now()}-context`,
+    authorId: activeStaffUser.value.id,
+    text: `Context: ${opportunity?.category ?? "Resident update"} · ${opportunity?.changes.join("; ") ?? resident.latest}`,
+    ts: "now",
+  });
   taggedMessageContext.value = null;
-  setView("provider-collaboration");
-  messageTab.value = "threads";
+  setView(roleMessagesView());
+  messageTab.value = "rooms";
   openThread(thread);
 }
 
@@ -4331,24 +5635,14 @@ function setActionAssignedRole(role: ActionTargetRole) {
 
 function createActionThread(action: ActionRequest) {
   const recipient = getUser(action.assignedUserId);
-  const thread: Thread = {
-    id: `action-thread-${Date.now()}`,
-    kind: "huddle",
-    title: `${action.residentName} · ${action.actionType}`,
-    members: ["me", ...uniqueIds([action.assignedUserId]).filter((id) => id !== activeStaffUser.value.id)],
-    lastMessage: `${residentTag(actionResident(action) ?? residents[0])} - ${action.actionType}: ${action.instructions}`,
-    lastTs: "now",
-    unread: selectedRole.value === action.assignedRole ? 0 : 1,
-    messages: [
-      {
-        id: `m-${Date.now()}`,
-        authorId: "me",
-        text: `${action.priority} action for ${recipient?.name ?? "care team"}: @${action.residentName} - ${action.instructions}`,
-        ts: "now",
-      },
-    ],
-  };
-  createLocalThread(thread);
+  const resident = actionResident(action) ?? residents[0];
+  const thread = ensureResidentCoordinationThread(resident, [action.assignedUserId]);
+  appendThreadMessage(thread.id, {
+    id: `m-${Date.now()}`,
+    authorId: activeStaffUser.value.id,
+    text: `${action.priority} action for ${recipient?.name ?? "care team"}: @${action.residentName} - ${action.instructions}`,
+    ts: "now",
+  });
   return thread.id;
 }
 
@@ -4381,7 +5675,7 @@ function createActionRequest() {
     action.linkedThreadId = selectedThread.value.id;
     appendThreadMessage(selectedThread.value.id, {
       id: `action-${Date.now()}`,
-      authorId: "me",
+      authorId: activeStaffUser.value.id,
       text: `Action requested: @${action.residentName} - ${action.actionType} assigned to ${actionAssigneeName(action)} by ${action.dueTime}.`,
       ts: "now",
     });
@@ -4452,7 +5746,7 @@ function updateActionStatus(action: ActionRequest, status: ActionStatus, note = 
   if (action.linkedThreadId) {
     appendThreadMessage(action.linkedThreadId, {
       id: `status-${Date.now()}`,
-      authorId: "me",
+      authorId: activeStaffUser.value.id,
       text: actionStatusThreadText(action, status, statusNote),
       ts: "now",
     });
@@ -4469,18 +5763,112 @@ function submitActionStatusUpdate() {
   closeActionStatusModal();
 }
 
-function setView(view: ViewName) {
+function closeHeaderMenus() {
   profileMenuOpen.value = false;
+  notificationMenuOpen.value = false;
+}
+
+function closeFloatingMenus() {
+  closeHeaderMenus();
+  residentActionMenuOpen.value = false;
+}
+
+function toggleProfileMenu() {
+  const nextOpen = !profileMenuOpen.value;
+  closeFloatingMenus();
+  profileMenuOpen.value = nextOpen;
+}
+
+function toggleNotificationMenu() {
+  const nextOpen = !notificationMenuOpen.value;
+  closeFloatingMenus();
+  notificationMenuOpen.value = nextOpen;
+}
+
+function toggleResidentActionMenu() {
+  const nextOpen = !residentActionMenuOpen.value;
+  residentActionMenuOpen.value = nextOpen;
+}
+
+function handleResidentHeaderAction(action: "escalate" | "order" | "huddle") {
+  const resident = selectedResident.value;
+  if (!resident) {
+    residentActionMenuOpen.value = false;
+    return;
+  }
+
+  residentActionMenuOpen.value = false;
+  if (action === "escalate") {
+    openEscalationModal(resident);
+    return;
+  }
+  if (action === "order") {
+    openOrderAction(resident);
+    return;
+  }
+  openHuddleModal(resident);
+}
+
+function addReadNotificationIds(ids: string[]) {
+  readNotificationIds.value = Array.from(new Set([...readNotificationIds.value, ...ids]));
+}
+
+function markAllNotificationsAsRead() {
+  const notifications = headerNotifications.value;
+  if (!notifications.length) {
+    return;
+  }
+
+  addReadNotificationIds(notifications.map((notification) => notification.id));
+}
+
+function handleNotificationSelection(notification: HeaderNotification) {
+  addReadNotificationIds([notification.id]);
+  closeFloatingMenus();
+  const { target } = notification;
+  if (target.type === "resident" || target.type === "escalation") {
+    openResident(target.residentId);
+    return;
+  }
+  if (target.type === "encounter") {
+    const encounter = providerVisitsState.value.find((visit) => visit.id === target.encounterId);
+    if (encounter?.status === "needs-review") {
+      openEncounterReview(encounter);
+      return;
+    }
+    // TODO(NOTES_PLUS): If an inbound status update makes this alert stale, refresh the encounter before falling back.
+    openResident(target.residentId);
+    residentTab.value = "notes";
+    return;
+  }
+  if (target.type === "schedule") {
+    openScheduleItem(target.item);
+    return;
+  }
+  openResident(target.action.residentId);
+}
+
+function setView(view: ViewName) {
+  closeFloatingMenus();
   escalationModalResidentId.value = null;
   scheduleModalOpen.value = false;
   editingClinicalOrderId.value = null;
   selectedScheduleDateKey.value = null;
+  closeStartEncounterModal();
   closeActionStatusModal();
+  closeThreadRenameModal();
+  threadMenuOpen.value = false;
   if (view !== "provider-visit") {
     stopVisitRecording();
     clearVisitElapsedTimer();
     activeVisitId.value = null;
     visitStopConfirmOpen.value = false;
+  }
+  if (view !== "provider-review") {
+    activeReviewVisitId.value = null;
+    revisionModalSectionId.value = null;
+    revisionModalThreadId.value = null;
+    signEncounterConfirmOpen.value = false;
   }
   activeView.value = view;
   selectedResidentId.value = null;
@@ -4490,11 +5878,14 @@ function setView(view: ViewName) {
 }
 
 function selectRole(role: RoleKey) {
-  profileMenuOpen.value = false;
+  closeFloatingMenus();
   escalationModalResidentId.value = null;
   scheduleModalOpen.value = false;
   editingClinicalOrderId.value = null;
   selectedScheduleDateKey.value = null;
+  closeStartEncounterModal();
+  closeThreadRenameModal();
+  threadMenuOpen.value = false;
   stopVisitRecording();
   clearVisitElapsedTimer();
   activeVisitId.value = null;
@@ -4506,14 +5897,14 @@ function selectRole(role: RoleKey) {
   activeView.value = roleProfiles[role].defaultView;
   selectedResidentId.value = null;
   selectedThreadId.value = null;
-  messageTab.value = "threads";
+  messageTab.value = "rooms";
   if (residentTab.value === "notes" && role !== "provider") {
     residentTab.value = "situation";
   }
 }
 
 function login() {
-  profileMenuOpen.value = false;
+  closeFloatingMenus();
   ensureLoginUserForRole(selectedRole.value);
   syncProfileFromLoginUser(selectedRole.value);
   isAuthenticated.value = true;
@@ -4521,14 +5912,17 @@ function login() {
   activeView.value = activeRole.value.defaultView;
   activeVisitId.value = null;
   visitStopConfirmOpen.value = false;
+  closeStartEncounterModal();
+  closeThreadRenameModal();
+  threadMenuOpen.value = false;
   selectedResidentId.value = null;
   selectedThreadId.value = null;
   threadMessages.value = [];
-  messageTab.value = "threads";
+  messageTab.value = "rooms";
 }
 
 function openResident(residentOrId: Resident | string) {
-  profileMenuOpen.value = false;
+  closeFloatingMenus();
   const resident =
     typeof residentOrId === "string"
       ? residents.find((entry) => entry.id === residentOrId)
@@ -4544,17 +5938,19 @@ function openResident(residentOrId: Resident | string) {
   workingCareSteps.value = { ...resident.careSteps };
   expandedProviderNoteId.value = null;
   encounterModalNoteId.value = null;
+  closeStartEncounterModal();
   deleteProviderNoteId.value = null;
   providerTranscript.value = "";
   providerNoteDraft.value = "";
   assignedNurse.value = null;
-  openClarify.value = null;
+  openClarify.value = resident.situation.clarify.length ? 0 : null;
   window.requestAnimationFrame(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   });
 }
 
 function closeResident() {
+  residentActionMenuOpen.value = false;
   if (activeView.value === "provider-visit") {
     stopVisitRecording();
     clearVisitElapsedTimer();
@@ -4606,15 +6002,16 @@ function sendResidentChat() {
 }
 
 function openThread(thread: Thread) {
-  if (thread.unread > 0) {
+  if (thread.unread > 0 || !visibleThreads.value.some((entry) => entry.id === thread.id)) {
     createLocalThread({ ...thread, unread: 0 });
   }
   selectedThreadId.value = thread.id;
   threadMessages.value = [...thread.messages];
   threadMenuOpen.value = false;
+  closeThreadUtilityModal();
 }
 
-function callMessage(mode: Exclude<MessageStartMode, "message">, authorId = "me"): ThreadMessage {
+function callMessage(mode: Exclude<MessageStartMode, "message">, authorId = activeStaffUser.value.id): ThreadMessage {
   return {
     id: `call-${Date.now()}`,
     authorId,
@@ -4625,30 +6022,130 @@ function callMessage(mode: Exclude<MessageStartMode, "message">, authorId = "me"
 }
 
 function openDirectMessage(user: CareUser, mode: MessageStartMode = "message") {
-  selectedThreadId.value = `dm-${user.id}`;
-  threadMessages.value =
-    mode === "message"
-      ? []
-      : [callMessage(mode)];
+  if (user.id === activeStaffUser.value.id) {
+    return;
+  }
+  const existingThread = visibleThreads.value.find(
+    (thread) =>
+      thread.kind === "dm" &&
+      thread.members.map((member) => normalizeActorId(member)).includes(activeStaffUser.value.id) &&
+      thread.members.map((member) => normalizeActorId(member)).includes(user.id),
+  );
+  if (existingThread) {
+    if (mode !== "message") {
+      appendThreadMessage(existingThread.id, callMessage(mode));
+    }
+    threadMenuOpen.value = false;
+    selectedUserIds.value = [];
+    openThread(
+      visibleThreads.value.find((thread) => thread.id === existingThread.id) ?? existingThread,
+    );
+    return;
+  }
+  const thread: Thread = {
+    id: `dm-${activeStaffUser.value.id}-${user.id}`,
+    kind: "dm",
+    purpose: "direct",
+    title: user.name,
+    members: uniqueIds([activeStaffUser.value.id, user.id]),
+    image: user.image,
+    lastMessage:
+      mode === "message"
+        ? "New direct message"
+        : mode === "video-call"
+          ? "Video call started"
+          : "Voice call started",
+    lastTs: "now",
+    unread: 0,
+    messages: mode === "message" ? [] : [callMessage(mode)],
+  };
+  createLocalThread(thread);
   threadMenuOpen.value = false;
   selectedUserIds.value = [];
+  openThread(thread);
+}
+
+function toggleThreadMenu() {
+  threadMenuOpen.value = !threadMenuOpen.value;
+}
+
+function openThreadSummary() {
+  if (!selectedThread.value) {
+    return;
+  }
+  threadUtilityModal.value = "summary";
+  threadUtilityMessageId.value = null;
+  threadMenuOpen.value = false;
+}
+
+function openThreadInsight() {
+  if (!selectedThread.value) {
+    return;
+  }
+  threadUtilityModal.value = "insight";
+  threadUtilityMessageId.value = null;
+  threadMenuOpen.value = false;
+}
+
+function openThreadTranscription(message: ThreadMessage) {
+  if (message.kind !== "voice-call" && message.kind !== "video-call") {
+    return;
+  }
+  threadUtilityModal.value = "transcription";
+  threadUtilityMessageId.value = message.id;
+  threadMenuOpen.value = false;
+}
+
+function closeThreadUtilityModal() {
+  threadUtilityModal.value = null;
+  threadUtilityMessageId.value = null;
+}
+
+function openThreadRenameModal() {
+  const thread = selectedThread.value;
+  if (!thread || thread.kind !== "huddle") {
+    return;
+  }
+  threadRenameDraft.value = thread.title;
+  threadRenameModalOpen.value = true;
+  threadMenuOpen.value = false;
+}
+
+function closeThreadRenameModal() {
+  threadRenameModalOpen.value = false;
+  threadRenameDraft.value = "";
+}
+
+function saveThreadRename() {
+  const thread = selectedThread.value;
+  const title = threadRenameDraft.value.trim();
+  if (!thread || thread.kind !== "huddle" || !title) {
+    return;
+  }
+
+  createLocalThread({ ...thread, title });
+  closeThreadRenameModal();
 }
 
 function closeThread() {
   selectedThreadId.value = null;
   threadMessages.value = [];
   threadDraft.value = "";
+  threadMenuOpen.value = false;
+  closeThreadUtilityModal();
+  closeThreadRenameModal();
 }
 
 function sendThreadMessage() {
   const text = threadDraft.value.trim();
-  if (!text) {
+  const thread = selectedThread.value;
+  if (!text || !thread) {
     return;
   }
 
-  threadMessages.value.push({
+  appendThreadMessage(thread.id, {
     id: `m-${Date.now()}`,
-    authorId: "me",
+    authorId: activeStaffUser.value.id,
     text,
     ts: "now",
   });
@@ -4666,10 +6163,11 @@ function startHuddle() {
 }
 
 function startGroupConversation(mode: MessageStartMode = "message") {
-  if (selectedUserIds.value.length === 0) {
+  const selectedIds = selectedUserIds.value.filter((userId) => userId !== activeStaffUser.value.id);
+  if (selectedIds.length === 0) {
     return;
   }
-  const selectedUsers = users.filter((user) => selectedUserIds.value.includes(user.id));
+  const selectedUsers = users.filter((user) => selectedIds.includes(user.id));
   const title =
     selectedUsers.length === 1
       ? selectedUsers[0].name
@@ -4679,8 +6177,9 @@ function startGroupConversation(mode: MessageStartMode = "message") {
   const thread: Thread = {
     id: `group-${Date.now()}`,
     kind: "huddle",
+    purpose: "staff-group",
     title,
-    members: ["me", ...selectedUsers.map((user) => user.id)],
+    members: uniqueIds([activeStaffUser.value.id, ...selectedUsers.map((user) => user.id)]),
     lastMessage:
       mode === "message"
         ? "New group conversation"
@@ -4694,7 +6193,7 @@ function startGroupConversation(mode: MessageStartMode = "message") {
         ? [
             {
               id: `m-${Date.now()}`,
-              authorId: "me",
+              authorId: activeStaffUser.value.id,
               text: "Started a group conversation.",
               ts: "now",
             },
@@ -4707,10 +6206,35 @@ function startGroupConversation(mode: MessageStartMode = "message") {
 }
 
 function startThreadCall(mode: Exclude<MessageStartMode, "message">) {
-  if (!selectedThread.value) {
+  const thread = selectedThread.value;
+  if (!thread) {
     return;
   }
-  threadMessages.value.push(callMessage(mode));
+  appendThreadMessage(thread.id, callMessage(mode));
+}
+
+function openSelectedThreadResident() {
+  const thread = selectedThread.value;
+  const resident = thread ? threadResident(thread) : null;
+  if (resident) {
+    openResident(resident);
+  }
+}
+
+function scheduleSelectedThreadHuddle() {
+  const thread = selectedThread.value;
+  const resident = thread ? threadResident(thread) : null;
+  if (resident) {
+    openScheduleModal("huddle", resident);
+  }
+}
+
+function openThreadUtilityResident() {
+  if (!threadUtilityResident.value) {
+    return;
+  }
+  closeThreadUtilityModal();
+  openSelectedThreadResident();
 }
 
 function sendAi(text: string, tailored?: SuggestedPrompt["response"]) {
@@ -4809,7 +6333,7 @@ function stopVisitRecording() {
   visitRecordingActive.value = false;
   clearVisitRecordingTimer();
   visitRecordingSeconds.value = Math.max(visitRecordingSeconds.value, 8);
-  visit.voiceTranscript = `${visit.residentName}: provider reviewed current trajectory, unresolved concerns, medication and monitoring needs, and care-team follow-up during this visit.`;
+  visit.voiceTranscript = `${visit.residentName}: provider reviewed current trajectory, unresolved concerns, medication and monitoring needs, and care-team follow-up during this encounter.`;
 }
 
 function startVisitRecording() {
@@ -4827,7 +6351,7 @@ function startVisitRecording() {
 
 function visitNoteSummary(visit: ProviderVisit) {
   const source = visit.textNote.trim() || visit.voiceTranscript.trim();
-  return source ? timelineSummary(source, 140) : "Visit opened; note content not added yet.";
+  return source ? timelineSummary(source, 140) : "Encounter opened; note content not added yet.";
 }
 
 function visitSourceLabel(visit: ProviderVisit) {
@@ -4843,40 +6367,58 @@ function visitOrderSummary(visit: ProviderVisit) {
   return count === 1 ? "1 order" : `${count} orders`;
 }
 
-function providerVisitStatusLabel(status: ProviderVisitStatus) {
-  return status.replace("-", " ");
-}
-
-function createProviderVisit(resident: Resident) {
-  const now = Date.now();
-  const visit: ProviderVisit = {
-    id: `visit-${now}`,
-    residentId: resident.id,
-    residentName: resident.name,
-    providerName: activeStaffUser.value.name,
-    visitType: selectedResidentOpportunity.value?.resident.id === resident.id ? "Acute" : "Follow-Up",
-    startedAt: currentTimeLabel(),
-    startedAtMs: now,
-    textNote: "",
-    voiceTranscript: "",
-    orderIds: [],
-    status: "in-progress",
+function providerVisitStatusLabel(visit: ProviderVisit) {
+  const labels: Record<ProviderEncounterStatus, string> = {
+    scheduled: "Scheduled",
+    "provider-in-progress": "Encounter In Progress",
+    "scribe-in-progress": "In Progress",
+    "needs-review": "Needs Review",
+    revision: "Revision",
+    "submitted-to-billing": "Submitted to Billing",
   };
-  providerVisitsState.value = [visit, ...providerVisitsState.value];
-  return visit;
+  return labels[visit.status];
 }
 
-function startVisitForResident(resident: Resident) {
-  stopVisitRecording();
-  profileMenuOpen.value = false;
+function visitSyncSummary(visit: ProviderVisit) {
+  if (visit.status === "scheduled" || visit.status === "provider-in-progress") {
+    return "";
+  }
+  if (visit.notesPlusSyncStatus === "synced") {
+    return `Automatically synced to Otangeles Notes+${visit.notesPlusSyncedAt ? ` at ${visit.notesPlusSyncedAt}` : ""}`;
+  }
+  return "Waiting to sync to Otangeles Notes+";
+}
+
+function defaultVisitTypeForResident(resident: Resident): VisitType {
+  return providerOpportunityByResidentId.value.get(resident.id)?.visitType ?? "Follow-Up";
+}
+
+function encounterResident(encounter: ProviderVisit) {
+  return residents.find((resident) => resident.id === encounter.residentId) ?? residents[0];
+}
+
+function inProgressVisitForResident(residentId: string) {
+  return providerVisitsState.value.find(
+    (visit) => visit.residentId === residentId && visit.status === "provider-in-progress",
+  ) ?? null;
+}
+
+function scheduledVisitForResident(residentId: string) {
+  return providerVisitsState.value.find(
+    (visit) => visit.residentId === residentId && visit.status === "scheduled",
+  ) ?? null;
+}
+
+function prepareResidentForEncounter(resident: Resident) {
+  closeFloatingMenus();
   selectedResidentId.value = resident.id;
   residentTab.value = "notes";
   residentChat.value = [...resident.talk];
   workingCareSteps.value = { ...resident.careSteps };
-  const existingVisit = providerVisitsState.value.find(
-    (visit) => visit.residentId === resident.id && visit.status === "in-progress",
-  );
-  const visit = existingVisit ?? createProviderVisit(resident);
+}
+
+function openProviderVisit(visit: ProviderVisit) {
+  closeFloatingMenus();
   activeVisitId.value = visit.id;
   activeView.value = "provider-visit";
   visitNoteMode.value = "text";
@@ -4889,9 +6431,100 @@ function startVisitForResident(resident: Resident) {
   });
 }
 
-function addVisitNoteForSelectedResident() {
+function createProviderVisit(resident: Resident, visitType: VisitType) {
+  const now = Date.now();
+  const visit: ProviderVisit = {
+    id: `visit-${now}`,
+    residentId: resident.id,
+    residentName: resident.name,
+    providerUserId: activeStaffUser.value.id,
+    providerName: activeStaffUser.value.name,
+    visitType,
+    scheduledDate: todayDateKey(),
+    scheduledTime: currentTimeLabel(),
+    clinicalPriority: mockEncounterPriority(resident),
+    visitReason: resident.situation.concerns[0]?.title ?? resident.latest,
+    baselineChange: resident.latest,
+    supportingEvidence: mockEncounterEvidence(resident),
+    startedAt: currentTimeLabel(),
+    startedAtMs: now,
+    textNote: "",
+    voiceTranscript: "",
+    orderIds: [],
+    status: "provider-in-progress",
+    notesPlusSyncStatus: "pending",
+    documentTitle: "Progress Notes",
+    sections: encounterSectionsForResident(resident),
+  };
+  providerVisitsState.value = [visit, ...providerVisitsState.value];
+  return visit;
+}
+
+function startVisitForResident(
+  resident: Resident,
+  visitType = defaultVisitTypeForResident(resident),
+  scheduledEncounter: ProviderVisit | null = null,
+) {
+  stopVisitRecording();
+  prepareResidentForEncounter(resident);
+  const existingVisit = inProgressVisitForResident(resident.id);
+  const visit = existingVisit ?? scheduledEncounter ?? createProviderVisit(resident, visitType);
+  if (visit.status === "scheduled") {
+    visit.status = "provider-in-progress";
+    visit.startedAt = currentTimeLabel();
+    visit.startedAtMs = Date.now();
+    visit.providerUserId = activeStaffUser.value.id;
+    visit.providerName = activeStaffUser.value.name;
+  }
+  openProviderVisit(visit);
+}
+
+function requestStartEncounterForResident(resident: Resident) {
+  const existingVisit = inProgressVisitForResident(resident.id);
+  if (existingVisit) {
+    startVisitForResident(resident);
+    return;
+  }
+
+  const scheduledVisit = scheduledVisitForResident(resident.id);
+  if (scheduledVisit) {
+    startVisitForResident(resident, scheduledVisit.visitType, scheduledVisit);
+    return;
+  }
+
+  closeFloatingMenus();
+  startEncounterResidentId.value = resident.id;
+  startEncounterDraft.value = {
+    visitType: defaultVisitTypeForResident(resident),
+  };
+}
+
+function startScheduledEncounter(encounter: ProviderVisit) {
+  const resident = residents.find((entry) => entry.id === encounter.residentId);
+  if (resident) {
+    startVisitForResident(resident, encounter.visitType, encounter);
+  }
+}
+
+function closeStartEncounterModal() {
+  startEncounterResidentId.value = null;
+}
+
+function submitStartEncounterModal() {
+  const resident = startEncounterResident.value;
+  if (!resident) {
+    closeStartEncounterModal();
+    return;
+  }
+
+  const visitType = startEncounterDraft.value.visitType;
+  closeStartEncounterModal();
+  startVisitForResident(resident, visitType);
+}
+
+function addEncounterNoteForSelectedResident() {
   if (selectedResident.value) {
-    startVisitForResident(selectedResident.value);
+    requestStartEncounterForResident(selectedResident.value);
   }
 }
 
@@ -4922,8 +6555,18 @@ function confirmStopVisit() {
 
   stopVisitRecording();
   clearVisitElapsedTimer();
-  visit.status = "completed";
+  visit.status = "scribe-in-progress";
   visit.endedAt = currentTimeLabel();
+  visit.assignedScribe = "Mark Rivera, Scribe";
+  syncProviderNoteIntoEncounterDocument(visit);
+  const assessmentPlanSection = visit.sections.find((section) => section.id === "assessment-plan");
+  if (assessmentPlanSection && visit.orderIds.length) {
+    assessmentPlanSection.content = [
+      ...assessmentPlanSection.content,
+      ...visit.orderIds.map((orderId) => ({ label: "Orders", text: `Linked clinical order ${orderId} routed with this encounter.` })),
+    ];
+  }
+  syncEndedEncounterToNotesPlus(visit);
   visitStopConfirmOpen.value = false;
   returnToResidentNotes();
 }
@@ -4941,6 +6584,347 @@ function openVisitOrder() {
   if (resident) {
     openScheduleModal("clinical-order", resident);
   }
+}
+
+function openEncounterReview(encounter: ProviderVisit) {
+  if (encounter.status !== "needs-review") {
+    return;
+  }
+  openResident(encounter.residentId);
+  residentTab.value = "notes";
+  activeReviewVisitId.value = encounter.id;
+  activeView.value = "provider-review";
+  window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+}
+
+function returnToResidentEncounters() {
+  const residentId = activeReviewEncounter.value?.residentId;
+  activeReviewVisitId.value = null;
+  revisionModalSectionId.value = null;
+  revisionModalThreadId.value = null;
+  signEncounterConfirmOpen.value = false;
+  activeView.value = "provider-home";
+  if (residentId) {
+    openResident(residentId);
+    residentTab.value = "notes";
+  }
+}
+
+function encounterSectionHasOpenRevision(section: EncounterSection) {
+  return section.revisionThreads.some((thread) => thread.status === "open");
+}
+
+function toggleEncounterSectionVerified(section: EncounterSection) {
+  if (section.verified || encounterSectionHasOpenRevision(section)) {
+    return;
+  }
+  section.verified = true;
+}
+
+function toggleAllEncounterSections(event: Event) {
+  const encounter = activeReviewEncounter.value;
+  const input = event.target as HTMLInputElement;
+  if (!encounter || activeReviewHasOpenRevisions.value) {
+    input.checked = false;
+    return;
+  }
+  encounter.sections.forEach((section) => {
+    section.verified = input.checked;
+  });
+}
+
+function openRevisionCommentModal(section: EncounterSection, thread: RevisionThread | null = null) {
+  revisionModalSectionId.value = section.id;
+  revisionModalThreadId.value = thread?.id ?? null;
+  revisionModalText.value = thread?.comments[0]?.body ?? "";
+}
+
+function closeRevisionCommentModal() {
+  revisionModalSectionId.value = null;
+  revisionModalThreadId.value = null;
+  revisionModalText.value = "";
+}
+
+function submitRevisionComment() {
+  const section = revisionModalSection.value;
+  const text = revisionModalText.value.trim();
+  if (!section || !text) {
+    return;
+  }
+
+  const existingThread = revisionModalThreadId.value
+    ? section.revisionThreads.find((thread) => thread.id === revisionModalThreadId.value)
+    : null;
+  if (existingThread?.comments[0]) {
+    existingThread.comments[0].body = text;
+    existingThread.comments[0].createdAt = currentTimeLabel();
+  } else {
+    const now = Date.now();
+    section.revisionThreads.push({
+      id: `revision-${section.id}-${now}`,
+      status: "open",
+      comments: [
+        {
+          id: `revision-comment-${now}`,
+          authorId: activeStaffUser.value.id,
+          authorName: activeStaffUser.value.name,
+          role: "provider",
+          body: text,
+          createdAt: currentTimeLabel(),
+        },
+      ],
+    });
+  }
+  section.verified = false;
+  closeRevisionCommentModal();
+}
+
+function deleteRevisionThread(section: EncounterSection, threadId: string) {
+  section.revisionThreads = section.revisionThreads.filter((thread) => thread.id !== threadId);
+  delete revisionReplyDrafts.value[threadId];
+}
+
+function submitRevisionReply(thread: RevisionThread) {
+  const body = revisionReplyDrafts.value[thread.id]?.trim();
+  if (!body || thread.status !== "open") {
+    return;
+  }
+  thread.comments.push({
+    id: `revision-reply-${Date.now()}`,
+    authorId: activeStaffUser.value.id,
+    authorName: activeStaffUser.value.name,
+    role: "provider",
+    body,
+    createdAt: currentTimeLabel(),
+  });
+  revisionReplyDrafts.value[thread.id] = "";
+}
+
+function deleteRevisionReply(thread: RevisionThread, commentId: string) {
+  thread.comments = thread.comments.filter(
+    (comment, index) => index === 0 || comment.id !== commentId || comment.authorId !== activeStaffUser.value.id,
+  );
+}
+
+function returnEncounterToScribe() {
+  const encounter = activeReviewEncounter.value;
+  if (!encounter || !activeReviewHasOpenRevisions.value) {
+    return;
+  }
+  returnEncounterRevisionToNotesPlus(encounter);
+  returnToResidentEncounters();
+}
+
+function simulateScribeResubmission(encounter: ProviderVisit) {
+  if (encounter.status !== "revision") {
+    return;
+  }
+  encounter.sections.forEach((section) => {
+    const openThreads = section.revisionThreads.filter((thread) => thread.status === "open");
+    openThreads.forEach((thread) => {
+      thread.status = "addressed";
+      thread.comments.push({
+        id: `scribe-reply-${thread.id}-${Date.now()}`,
+        authorId: "mock-scribe",
+        authorName: encounter.assignedScribe ?? "Mark Rivera, Scribe",
+        role: "scribe",
+        body: "The requested correction has been applied to this section and is ready for provider review.",
+        createdAt: currentTimeLabel(),
+      });
+    });
+    if (openThreads.length) {
+      section.content = [
+        ...section.content,
+        { label: "Scribe revision", text: "Updated to incorporate the provider's clarification request." },
+      ];
+      section.revisedAt = currentTimeLabel();
+    }
+    section.verified = false;
+  });
+  // TODO(NOTES_PLUS): Remove this prototype control when Scribe resubmission status updates arrive from Notes+.
+  receiveEncounterStatusFromNotesPlus(encounter, "needs-review");
+  readNotificationIds.value = readNotificationIds.value.filter(
+    (id) => id !== `encounter-review-${encounter.id}`,
+  );
+}
+
+function requestEncounterSignature() {
+  if (!activeReviewEncounter.value || activeReviewHasOpenRevisions.value || !activeReviewAllVerified.value) {
+    return;
+  }
+  if (!currentProviderSignature.value) {
+    signatureSetupPromptOpen.value = true;
+    return;
+  }
+  signEncounterConfirmOpen.value = true;
+}
+
+function confirmEncounterSignature() {
+  const encounter = activeReviewEncounter.value;
+  const signature = currentProviderSignature.value;
+  if (!encounter || !signature || !activeReviewAllVerified.value || activeReviewHasOpenRevisions.value) {
+    return;
+  }
+  const signedAt = `${new Date().toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })} ${currentTimeLabel()}`;
+  encounter.signedSignature = {
+    method: signature.method,
+    typedName: signature.typedName,
+    dataUrl: signature.dataUrl,
+    savedAt: signature.savedAt,
+    providerId: activeStaffUser.value.id,
+    providerName: activeStaffUser.value.name,
+    signedAt,
+  };
+  submitSignedEncounterToNotesPlus(encounter);
+  signEncounterConfirmOpen.value = false;
+  returnToResidentEncounters();
+}
+
+function setSignatureMode(mode: SignatureMethod) {
+  signatureMode.value = mode;
+  signatureError.value = "";
+  signatureSavedMessage.value = "";
+  if (mode === "draw") {
+    nextTick(clearSignatureCanvas);
+  }
+}
+
+function signatureCanvasPoint(event: PointerEvent) {
+  const canvas = signatureCanvas.value;
+  if (!canvas) {
+    return { x: 0, y: 0 };
+  }
+  const bounds = canvas.getBoundingClientRect();
+  return {
+    x: ((event.clientX - bounds.left) / bounds.width) * canvas.width,
+    y: ((event.clientY - bounds.top) / bounds.height) * canvas.height,
+  };
+}
+
+function beginSignatureDrawing(event: PointerEvent) {
+  const canvas = signatureCanvas.value;
+  const context = canvas?.getContext("2d");
+  if (!canvas || !context) {
+    return;
+  }
+  signatureDrawing.value = true;
+  canvas.setPointerCapture(event.pointerId);
+  const point = signatureCanvasPoint(event);
+  context.beginPath();
+  context.moveTo(point.x, point.y);
+  context.strokeStyle = "#1c192e";
+  context.lineWidth = 4;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+}
+
+function drawSignature(event: PointerEvent) {
+  const context = signatureCanvas.value?.getContext("2d");
+  if (!signatureDrawing.value || !context) {
+    return;
+  }
+  const point = signatureCanvasPoint(event);
+  context.lineTo(point.x, point.y);
+  context.stroke();
+  signatureCanvasDirty.value = true;
+}
+
+function endSignatureDrawing() {
+  signatureDrawing.value = false;
+}
+
+function clearSignatureCanvas() {
+  const canvas = signatureCanvas.value;
+  const context = canvas?.getContext("2d");
+  if (canvas && context) {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  signatureCanvasDirty.value = false;
+}
+
+function handleSignatureUpload(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  signatureError.value = "";
+  signatureSavedMessage.value = "";
+  if (!file) {
+    return;
+  }
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    signatureError.value = "Upload a PNG, JPEG, or WebP signature image.";
+    input.value = "";
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    signatureError.value = "Signature images must be 2 MB or smaller.";
+    input.value = "";
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    signatureUploadPreview.value = typeof reader.result === "string" ? reader.result : "";
+  };
+  reader.onerror = () => {
+    signatureError.value = "The selected signature image could not be read.";
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveProviderSignature() {
+  signatureError.value = "";
+  signatureSavedMessage.value = "";
+  let signature: ProviderSignature | null = null;
+  const savedAt = `${new Date().toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })} ${currentTimeLabel()}`;
+  if (signatureMode.value === "type") {
+    const typedName = signatureTypedName.value.trim();
+    if (!typedName) {
+      signatureError.value = "Type the provider name before saving the signature.";
+      return;
+    }
+    signature = { method: "type", typedName, savedAt };
+  } else if (signatureMode.value === "draw") {
+    if (!signatureCanvasDirty.value || !signatureCanvas.value) {
+      signatureError.value = "Draw a signature in the box before saving.";
+      return;
+    }
+    signature = { method: "draw", dataUrl: signatureCanvas.value.toDataURL("image/png"), savedAt };
+  } else {
+    if (!signatureUploadPreview.value) {
+      signatureError.value = "Choose a signature image before saving.";
+      return;
+    }
+    signature = { method: "upload", dataUrl: signatureUploadPreview.value, savedAt };
+  }
+  providerSignatures.value = {
+    ...providerSignatures.value,
+    [activeStaffUser.value.id]: signature,
+  };
+  signatureSavedMessage.value = "Signature saved for encounter signing.";
+}
+
+function removeProviderSignature() {
+  const next = { ...providerSignatures.value };
+  delete next[activeStaffUser.value.id];
+  providerSignatures.value = next;
+  signatureSavedMessage.value = "Signature removed.";
+  signatureError.value = "";
+}
+
+function goToSignatureSettings() {
+  signatureSetupPromptOpen.value = false;
+  signatureTypedName.value ||= activeProfileDisplayName.value;
+  setView("provider-profile");
+  nextTick(() => {
+    document.getElementById("provider-signature-settings")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
+function resetMockEncounterWorkflow() {
+  providerVisitsState.value = cloneInitialProviderVisits();
+  activeVisitId.value = null;
+  activeReviewVisitId.value = null;
+  readNotificationIds.value = readNotificationIds.value.filter((id) => !id.startsWith("encounter-review-"));
+  signatureSavedMessage.value = "Mock encounter workflow reset.";
 }
 
 function createProviderNote(source: ProviderNoteSource, body: string) {
@@ -5191,6 +7175,7 @@ function statusTone(label: string) {
     normalized.includes("escalated") ||
     normalized.includes("hospital") ||
     normalized.includes("correction") ||
+    normalized.includes("revision") ||
     normalized.includes("flagged") ||
     normalized.includes("cancelled") ||
     normalized.includes("stat")
@@ -5221,7 +7206,11 @@ function statusTone(label: string) {
     normalized.includes("ready") ||
     normalized.includes("completed") ||
     normalized.includes("scheduled") ||
-    normalized.includes("sent")
+    normalized.includes("sent") ||
+    normalized.includes("submitted") ||
+    normalized.includes("billing") ||
+    normalized.includes("verified") ||
+    normalized.includes("synced")
   ) {
     return "success";
   }
@@ -5277,7 +7266,7 @@ function threadIcon(thread: Thread) {
   if (thread.kind === "huddle") {
     return Users;
   }
-  const otherMember = thread.members.find((member) => member !== "me");
+  const otherMember = directThreadPeer(thread);
   return careUserIcon(otherMember ? getUser(otherMember) : null);
 }
 
@@ -5311,11 +7300,11 @@ function presenceText(user: CareUser) {
 }
 
 function authorName(authorId: string) {
-  return authorId === "me" ? appUser.value.name : getUser(authorId)?.name ?? "Care team";
+  return isCurrentUser(authorId) ? appUser.value.name : userName(authorId);
 }
 
 function signOut() {
-  profileMenuOpen.value = false;
+  closeFloatingMenus();
   showSignOutModal.value = true;
 }
 
@@ -5330,7 +7319,7 @@ function confirmSignOut() {
   threadMessages.value = [];
   activeView.value = activeRole.value.defaultView;
   showSignOutModal.value = false;
-  profileMenuOpen.value = false;
+  closeFloatingMenus();
   profileModal.value = null;
   taggedMessageContext.value = null;
   actionModalSource.value = null;
@@ -5419,7 +7408,7 @@ function isSageNav(view: ViewName) {
           </span>
           <span>
             <strong>{{ activeStaffUser.name }}</strong>
-            <small>{{ activeStaffUser.role }}</small>
+            <small>{{ normalizeSystemRole(activeStaffUser.role) }}</small>
           </span>
         </div>
 
@@ -5480,38 +7469,92 @@ function isSageNav(view: ViewName) {
             :model-value="selectedFacility"
             :options="facilitySelectOptions"
             aria-label="Switch facility"
-            @click="profileMenuOpen = false"
+            @click="closeHeaderMenus"
             @update:model-value="setSelectedFacility"
           />
         </div>
 
-        <div class="profile-menu-wrap">
-          <button
-            class="profile-menu-trigger"
-            type="button"
-            aria-label="Open profile menu"
-            :aria-expanded="profileMenuOpen"
-            @click="profileMenuOpen = !profileMenuOpen"
-          >
-            <span class="staff-avatar" aria-hidden="true">
-              <UserIcon :size="18" />
-            </span>
-          </button>
-
-          <div v-if="profileMenuOpen" class="profile-menu panel">
-            <div class="profile-menu-head">
-              <span class="staff-avatar large" aria-hidden="true">
-                <UserIcon :size="22" />
+        <div class="header-menu-cluster">
+          <div class="notification-menu-wrap">
+            <button
+              class="icon-button notification-trigger"
+              type="button"
+              aria-label="Open notifications"
+              :aria-expanded="notificationMenuOpen"
+              @click="toggleNotificationMenu"
+            >
+              <Bell :size="18" />
+              <span v-if="headerNotificationCount" class="notification-badge">
+                {{ headerNotificationCount }}
               </span>
-              <span>
-                <strong>{{ activeProfile.fullName }}</strong>
-                <small>{{ profileMenuRoleLabel }}</small>
-              </span>
-            </div>
-            <button class="danger-text" type="button" @click="signOut">
-              <LogOut :size="16" />
-              Logout
             </button>
+
+            <div v-if="notificationMenuOpen" class="notification-menu panel">
+              <div class="notification-menu-head">
+                <strong>Notifications</strong>
+                <button
+                  class="notification-mark-read"
+                  type="button"
+                  :disabled="!headerNotificationCount"
+                  @click="markAllNotificationsAsRead"
+                >
+                  Mark All as Read
+                </button>
+              </div>
+              <div class="notification-menu-body">
+                <button
+                  v-for="notification in headerNotifications"
+                  :key="notification.id"
+                  class="notification-row"
+                  :class="notification.tone"
+                  type="button"
+                  @click="handleNotificationSelection(notification)"
+                >
+                  <span class="notification-icon">
+                    <component :is="notification.icon" :size="16" />
+                  </span>
+                  <span class="notification-copy">
+                    <strong>{{ notification.title }}</strong>
+                    <small>{{ notification.detail }}</small>
+                    <b>{{ notification.meta }}</b>
+                  </span>
+                  <span v-if="notification.unread" class="notification-unread-dot" aria-hidden="true"></span>
+                </button>
+                <p v-if="!headerNotifications.length" class="empty-copy compact-empty">
+                  No active notifications right now.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-menu-wrap">
+            <button
+              class="profile-menu-trigger"
+              type="button"
+              aria-label="Open profile menu"
+              :aria-expanded="profileMenuOpen"
+              @click="toggleProfileMenu"
+            >
+              <span class="staff-avatar" aria-hidden="true">
+                <UserIcon :size="18" />
+              </span>
+            </button>
+
+            <div v-if="profileMenuOpen" class="profile-menu panel">
+              <div class="profile-menu-head">
+                <span class="staff-avatar large" aria-hidden="true">
+                  <UserIcon :size="22" />
+                </span>
+                <span>
+                  <strong>{{ activeProfileDisplayName }}</strong>
+                  <small>{{ profileMenuRoleLabel }}</small>
+                </span>
+              </div>
+              <button class="danger-text" type="button" @click="signOut">
+                <LogOut :size="16" />
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -5521,14 +7564,14 @@ function isSageNav(view: ViewName) {
         class="screen visit-screen"
       >
         <header class="screen-header detail-header visit-detail-header content-frame">
-          <button class="icon-button" type="button" aria-label="Back to visit notes" @click="returnToResidentNotes">
+          <button class="icon-button" type="button" aria-label="Back to encounter notes" @click="returnToResidentNotes">
             <ArrowLeft :size="19" />
           </button>
           <div class="title-stack">
-            <h1>Visit @{{ activeVisitResident.name }}</h1>
+            <h1>Encounter @{{ activeVisitResident.name }}</h1>
             <p>{{ activeProviderVisit.visitType }} · Room {{ activeVisitResident.room }} · {{ residentFacility(activeVisitResident) }}</p>
           </div>
-          <span class="chip compact">Time Lapsed {{ visitElapsedLabel }}</span>
+          <span class="chip compact">Encounter Time {{ visitElapsedLabel }}</span>
         </header>
 
         <div class="visit-page content-frame">
@@ -5553,11 +7596,11 @@ function isSageNav(view: ViewName) {
             </div>
 
           <label v-if="visitNoteMode === 'text'" class="visit-text-note">
-            <span class="section-label">Visit Narrative</span>
+            <span class="section-label">Encounter Narrative</span>
             <textarea
               v-model="activeProviderVisit.textNote"
               rows="10"
-                placeholder="Document assessment, plan, and visit-specific context..."
+                placeholder="Document assessment, plan, and encounter-specific context..."
               />
             </label>
 
@@ -5565,7 +7608,7 @@ function isSageNav(view: ViewName) {
               <div class="recording-copy">
                 <strong>{{ visitRecordingActive ? "Recording voice note" : "Voice note capture" }}</strong>
                 <span>
-                  {{ visitRecordingActive ? "Live transcription in progress" : "Tap record to capture visit dictation" }}
+                  {{ visitRecordingActive ? "Live transcription in progress" : "Tap record to capture encounter dictation" }}
                 </span>
               </div>
               <button
@@ -5591,7 +7634,7 @@ function isSageNav(view: ViewName) {
                   {{ visitRecordingActive ? "Live Transcript" : "Generated Transcript" }}
                 </div>
                 <p>
-                  {{ visitRecordingActive ? "Listening for the provider visit note..." : activeProviderVisit.voiceTranscript }}
+                  {{ visitRecordingActive ? "Listening for the provider encounter note..." : activeProviderVisit.voiceTranscript }}
                 </p>
               </div>
             </div>
@@ -5600,8 +7643,8 @@ function isSageNav(view: ViewName) {
           <article v-if="activeVisitOrders.length" class="panel visit-orders-panel">
             <div class="notes-panel-header">
               <div>
-                <div class="section-label">Visit Orders</div>
-                <h2>{{ activeVisitOrders.length }} order{{ activeVisitOrders.length === 1 ? "" : "s" }} from this visit</h2>
+                <div class="section-label">Encounter Orders</div>
+                <h2>{{ activeVisitOrders.length }} order{{ activeVisitOrders.length === 1 ? "" : "s" }} from this encounter</h2>
               </div>
             </div>
             <div class="schedule-list compact-schedule-list">
@@ -5625,13 +7668,269 @@ function isSageNav(view: ViewName) {
           <div class="visit-action-bar">
             <button class="danger-action" type="button" @click="requestStopVisit">
               <X :size="16" />
-              Stop Visit
+              End Encounter
             </button>
             <button class="primary-action" type="button" @click="openVisitOrder">
               <FileText :size="16" />
               New Order
             </button>
           </div>
+        </div>
+      </section>
+
+      <section
+        v-else-if="activeView === 'provider-review' && activeReviewEncounter && activeReviewResident"
+        class="screen encounter-review-screen"
+      >
+        <header class="screen-header detail-header encounter-review-header content-frame">
+          <button class="icon-button" type="button" aria-label="Back to resident encounters" @click="returnToResidentEncounters">
+            <ArrowLeft :size="19" />
+          </button>
+          <div class="title-stack">
+            <h1>Review Encounter</h1>
+            <p>{{ activeReviewEncounter.residentName }} · {{ activeReviewEncounter.visitType }}</p>
+          </div>
+          <div class="encounter-review-header-actions" :class="{ 'has-revisions': activeReviewHasOpenRevisions }">
+            <label class="review-all-switch header-review-all" :class="{ disabled: activeReviewHasOpenRevisions }">
+              <input
+                type="checkbox"
+                role="switch"
+                :checked="activeReviewAllVerified"
+                :disabled="activeReviewHasOpenRevisions"
+                @change="toggleAllEncounterSections"
+              />
+              <span>
+                <strong>Mark all sections as verified</strong>
+                <small v-if="activeReviewHasOpenRevisions">Resolve or return open revision requests first.</small>
+                <small v-else>{{ activeReviewEncounter.sections.filter((section) => section.verified).length }} of {{ activeReviewEncounter.sections.length }} sections verified</small>
+              </span>
+            </label>
+            <button
+              class="review-primary-action"
+              :class="{ 'return-to-scribe': activeReviewHasOpenRevisions }"
+              type="button"
+              :disabled="!activeReviewHasOpenRevisions && !activeReviewAllVerified"
+              @click="activeReviewHasOpenRevisions ? returnEncounterToScribe() : requestEncounterSignature()"
+            >
+              <Undo2 v-if="activeReviewHasOpenRevisions" :size="17" />
+              <Signature v-else :size="17" />
+              {{ activeReviewHasOpenRevisions ? "Return to Scribe" : "Sign Encounter" }}
+            </button>
+          </div>
+        </header>
+
+        <div class="encounter-review-page content-frame">
+          <article class="panel encounter-print-document">
+            <header class="encounter-document-facility">
+              <strong>{{ residentFacility(activeReviewResident) }}</strong>
+              <span>{{ facilityDocumentDetails[residentFacility(activeReviewResident)].address }}</span>
+              <span>
+                Tel: {{ facilityDocumentDetails[residentFacility(activeReviewResident)].phone }} ·
+                Fax: {{ facilityDocumentDetails[residentFacility(activeReviewResident)].fax }}
+              </span>
+            </header>
+
+            <section class="encounter-document-patient">
+              <div class="encounter-document-title-row">
+                <div>
+                  <span>{{ activeReviewEncounter.documentTitle }}</span>
+                  <h2>{{ activeReviewResident.name.toUpperCase() }} ({{ activeReviewResident.sex }})</h2>
+                  <p>
+                    Encounter ID: {{ activeReviewEncounter.id.toUpperCase() }} ·
+                    DOB: {{ mockResidentDateOfBirth(activeReviewResident) }} ·
+                    <strong>{{ activeReviewResident.codeStatus }}</strong>
+                  </p>
+                </div>
+                <span class="chip compact warning">Needs Review</span>
+              </div>
+
+              <dl class="encounter-document-metadata">
+                <div><dt>Date of Service</dt><dd>{{ formatDocumentDate(activeReviewEncounter.scheduledDate) }}</dd></div>
+                <div><dt>Visit Type</dt><dd>{{ activeReviewEncounter.visitType }}</dd></div>
+                <div><dt>Attending Provider</dt><dd>{{ activeReviewEncounter.providerName }}</dd></div>
+                <div><dt>Assigned Scribe</dt><dd>{{ activeReviewEncounter.assignedScribe ?? "Mark Rivera, Scribe" }}</dd></div>
+              </dl>
+            </section>
+
+            <div class="encounter-document-body-heading">
+              <div>
+                <h3>Progress Notes</h3>
+                <span>{{ activeReviewEncounter.startedAt }} – {{ activeReviewEncounter.endedAt ?? activeReviewEncounter.notesPlusSyncedAt }}</span>
+              </div>
+              <span class="document-encounter-id">{{ activeReviewEncounter.id.toUpperCase() }}</span>
+            </div>
+
+            <div class="encounter-document-sections">
+              <article
+                v-for="section in activeReviewEncounter.sections"
+                :key="section.id"
+                class="encounter-document-card"
+                :class="{ verified: section.verified, 'has-open-revision': encounterSectionHasOpenRevision(section) }"
+              >
+                <header class="encounter-section-header">
+                  <div class="encounter-section-title">
+                    <h2>{{ section.title }}</h2>
+                    <span class="section-record-status">New</span>
+                    <small v-if="section.revisedAt">Revised by Scribe · {{ section.revisedAt }}</small>
+                  </div>
+                  <div class="encounter-section-actions">
+                    <button type="button" class="section-action revision-action" @click="openRevisionCommentModal(section)">
+                      <MessageSquarePlus :size="15" />
+                      Add Revision Comment
+                    </button>
+                    <span class="section-actions-divider" aria-hidden="true" />
+                    <button
+                      type="button"
+                      class="section-action verify-action"
+                      :disabled="section.verified || encounterSectionHasOpenRevision(section)"
+                      @click="toggleEncounterSectionVerified(section)"
+                    >
+                      <CheckCircle :size="15" />
+                      {{ section.verified ? "Verified" : "Mark as Verified" }}
+                    </button>
+                  </div>
+                </header>
+
+                <div
+                  v-if="section.revisionThreads.length"
+                  class="revision-thread-stack"
+                  :class="{ 'has-open-revision': encounterSectionHasOpenRevision(section) }"
+                >
+                  <div class="revision-stack-title">Revision Requests</div>
+                  <article
+                    v-for="(thread, threadIndex) in section.revisionThreads"
+                    :key="thread.id"
+                    class="revision-thread-card"
+                    :class="thread.status"
+                  >
+                    <header>
+                      <strong>Request {{ threadIndex + 1 }}</strong>
+                      <div class="revision-thread-actions">
+                        <span class="revision-status-pill" :class="thread.status">
+                          <Check v-if="thread.status === 'addressed'" :size="12" />
+                          {{ thread.status === "addressed" ? "Addressed" : "For Review" }}
+                        </span>
+                        <template v-if="thread.status === 'open'">
+                          <button type="button" aria-label="Edit revision request" @click="openRevisionCommentModal(section, thread)">
+                            <Edit3 :size="14" />
+                          </button>
+                          <button type="button" aria-label="Delete revision request" @click="deleteRevisionThread(section, thread.id)">
+                            <Trash2 :size="14" />
+                          </button>
+                        </template>
+                      </div>
+                    </header>
+                    <p>{{ thread.comments[0]?.body }}</p>
+                    <div v-if="thread.comments.length > 1" class="revision-reply-list">
+                      <div v-for="reply in thread.comments.slice(1)" :key="reply.id" class="revision-reply-row">
+                        <p>
+                          <strong :class="reply.role">{{ reply.role === "provider" ? "Provider" : "Scribe" }} Comment:</strong>
+                          {{ reply.body }}
+                          <small>{{ reply.authorName }} · {{ reply.createdAt }}</small>
+                        </p>
+                        <button
+                          v-if="reply.authorId === activeStaffUser.id && thread.status === 'open'"
+                          type="button"
+                          aria-label="Delete your reply"
+                          @click="deleteRevisionReply(thread, reply.id)"
+                        >
+                          <X :size="13" />
+                        </button>
+                      </div>
+                    </div>
+                    <form v-if="thread.status === 'open'" class="revision-inline-reply" @submit.prevent="submitRevisionReply(thread)">
+                      <input v-model="revisionReplyDrafts[thread.id]" type="text" placeholder="Add a comment..." />
+                      <button type="submit" aria-label="Send reply" :disabled="!revisionReplyDrafts[thread.id]?.trim()">
+                        <Send :size="15" />
+                      </button>
+                    </form>
+                  </article>
+                </div>
+
+                <div
+                  class="encounter-section-content"
+                  :class="[
+                    `content-${section.kind}`,
+                    `section-${section.id}`,
+                    { 'content-long-form': section.id === 'review-of-systems' || section.id === 'physical-exam' },
+                  ]"
+                >
+                  <template v-if="section.id === 'vital-signs'">
+                    <ul class="encounter-reference-list-grid encounter-vitals-grid">
+                      <li v-for="(item, itemIndex) in section.content" :key="itemIndex">
+                        <strong>{{ item.label }}</strong>
+                        <span>{{ item.text }}</span>
+                      </li>
+                    </ul>
+                  </template>
+                  <template v-else-if="section.id === 'social-history' || section.id === 'immunizations'">
+                    <ul class="encounter-reference-list-grid">
+                      <li v-for="(item, itemIndex) in section.content" :key="itemIndex">
+                        <strong>{{ item.label }}</strong>
+                        <span>{{ item.text }}</span>
+                      </li>
+                    </ul>
+                  </template>
+                  <template v-else-if="section.id === 'family-history'">
+                    <div class="encounter-family-grid">
+                      <article v-for="(item, itemIndex) in section.content" :key="itemIndex" class="encounter-family-card">
+                        <strong>{{ item.label }}</strong>
+                        <span>{{ item.text }}</span>
+                      </article>
+                    </div>
+                  </template>
+                  <template v-else-if="section.id === 'review-of-systems' || section.id === 'physical-exam'">
+                    <div class="encounter-system-list">
+                      <section v-for="(item, itemIndex) in section.content" :key="itemIndex" class="encounter-system-group">
+                        <strong>{{ item.label }}</strong>
+                        <ul>
+                          <li
+                            v-for="(detail, detailIndex) in splitEncounterDetail(item.text)"
+                            :key="detailIndex"
+                            :class="{ reported: detail.startsWith('Reports:') }"
+                          >
+                            {{ detail }}
+                          </li>
+                        </ul>
+                      </section>
+                    </div>
+                  </template>
+                  <template v-else-if="section.id === 'assessment-plan'">
+                    <div class="encounter-assessment-layout">
+                      <p class="encounter-assessment-summary">
+                        <strong>{{ section.content[0]?.label }}:</strong>
+                        {{ section.content[0]?.text }}
+                      </p>
+                      <div class="encounter-diagnosis-list">
+                        <div v-for="(item, itemIndex) in section.content.slice(1)" :key="itemIndex" class="encounter-diagnosis-row">
+                          <strong>{{ item.label }}</strong>
+                          <span>{{ item.text }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <template v-else-if="section.kind === 'bullets'">
+                    <ul>
+                      <li v-for="(item, itemIndex) in section.content" :key="itemIndex">
+                        <strong v-if="item.label">{{ item.label }}:</strong> {{ item.text }}
+                      </li>
+                    </ul>
+                  </template>
+                  <template v-else-if="section.kind === 'grid'">
+                    <div v-for="(item, itemIndex) in section.content" :key="itemIndex" class="encounter-content-row">
+                      <strong>{{ item.label }}</strong>
+                      <span>{{ item.text }}</span>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <p v-for="(item, itemIndex) in section.content" :key="itemIndex">
+                      <strong v-if="item.label">{{ item.label }}:</strong> {{ item.text }}
+                    </p>
+                  </template>
+                </div>
+              </article>
+            </div>
+          </article>
         </div>
       </section>
 
@@ -5648,31 +7947,32 @@ function isSageNav(view: ViewName) {
               }}{{ selectedResident.sex }} · Room {{ selectedResident.room }} · {{ residentFacility(selectedResident) }}
             </p>
           </div>
-          <div class="detail-header-actions">
+          <div class="detail-header-actions resident-action-menu-wrap">
             <button
-              class="danger-action compact-action"
+              class="primary-action compact-action resident-action-trigger"
               type="button"
-              @click="openEscalationModal(selectedResident)"
+              aria-label="Open resident actions"
+              :aria-expanded="residentActionMenuOpen"
+              @click="toggleResidentActionMenu"
             >
-              <AlertTriangle :size="16" />
-              {{ canDirectlyEscalate() ? "Escalate" : "Request Escalation" }}
+              <MoreVertical :size="16" />
+              Actions
+              <ChevronDown :size="15" />
             </button>
-            <button
-              class="soft-action compact-action"
-              type="button"
-              @click="openOrderAction(selectedResident)"
-            >
-              <FileText :size="16" />
-              {{ selectedRole === "provider" ? "New Order" : "Request Order Review" }}
-            </button>
-            <button
-              class="huddle-button compact-action"
-              type="button"
-              @click="openHuddleModal(selectedResident)"
-            >
-              <Users :size="16" />
-              Schedule Huddle
-            </button>
+            <div v-if="residentActionMenuOpen" class="resident-action-menu panel">
+              <button type="button" class="danger-text" @click="handleResidentHeaderAction('escalate')">
+                <AlertTriangle :size="16" />
+                {{ canDirectlyEscalate() ? "Escalate" : "Request Escalation" }}
+              </button>
+              <button type="button" @click="handleResidentHeaderAction('order')">
+                <FileText :size="16" />
+                {{ selectedRole === "provider" ? "New Order" : "Request Order Review" }}
+              </button>
+              <button type="button" @click="handleResidentHeaderAction('huddle')">
+                <Users :size="16" />
+                Schedule Huddle
+              </button>
+            </div>
           </div>
         </header>
 
@@ -5760,7 +8060,6 @@ function isSageNav(view: ViewName) {
 
             <div class="card-actions patient-focus-action-strip">
               <button
-                v-if="selectedResidentOpportunity"
                 class="soft-action compact-action"
                 type="button"
                 @click="toggleSection(residentSectionKey('prediction-evidence'))"
@@ -5772,10 +8071,10 @@ function isSageNav(view: ViewName) {
                 v-if="selectedRole === 'provider'"
                 class="primary-action compact-action"
                 type="button"
-                @click="startVisitForResident(selectedResident)"
+                @click="requestStartEncounterForResident(selectedResident)"
               >
                 <FileText :size="15" />
-                Start Visit
+                Start Encounter
               </button>
               <button
                 v-else-if="selectedResidentOpportunity && !actionForOpportunity(selectedResidentOpportunity)"
@@ -5807,22 +8106,22 @@ function isSageNav(view: ViewName) {
             </div>
 
             <div
-              v-if="selectedResidentOpportunity && isSectionExpanded(residentSectionKey('prediction-evidence'))"
+              v-if="isSectionExpanded(residentSectionKey('prediction-evidence'))"
               class="prediction-evidence"
             >
               <div class="delegate-summary">
-                <span><strong>Sources:</strong> {{ opportunitySourceSummary(selectedResidentOpportunity) }}</span>
+                <span><strong>Sources:</strong> {{ selectedResidentEvidenceSourceSummary }}</span>
               </div>
               <div class="evidence-group-list">
                 <div
-                  v-for="group in opportunityEvidenceGroups(selectedResidentOpportunity)"
+                  v-for="group in selectedResidentEvidenceGroups"
                   :key="group.source"
                   class="evidence-group"
                 >
                   <strong>{{ group.source }}:</strong>
                   <ul>
-                    <li v-for="event in group.events" :key="event.id">
-                      {{ opportunityEvidenceItemText(event) }}
+                    <li v-for="item in group.items" :key="item">
+                      {{ item }}
                     </li>
                   </ul>
                 </div>
@@ -5953,12 +8252,12 @@ function isSageNav(view: ViewName) {
             <section class="panel notes-list-panel visit-list-panel">
               <div class="notes-panel-header visit-list-header">
                 <div>
-                  <div class="section-label">Visit Notes</div>
+                  <div class="section-label">Encounter Notes</div>
                   <h2>{{ selectedResident.name }}</h2>
                 </div>
-                <button class="primary-action compact-action" type="button" @click="addVisitNoteForSelectedResident">
+                <button class="primary-action compact-action" type="button" @click="addEncounterNoteForSelectedResident">
                   <FileText :size="15" />
-                  Add Visit Note
+                  Add Encounter Note
                 </button>
               </div>
 
@@ -5970,11 +8269,14 @@ function isSageNav(view: ViewName) {
                 >
                   <div class="visit-card-head">
                     <span>
-                      <strong>{{ visit.visitType }} visit</strong>
-                      <small>{{ visit.providerName }} · {{ visit.startedAt }}{{ visit.endedAt ? ` - ${visit.endedAt}` : "" }}</small>
+                      <strong>{{ visit.visitType }} encounter</strong>
+                      <small>
+                        {{ visit.providerName }} ·
+                        {{ visit.startedAt || `${visit.scheduledDate} ${visit.scheduledTime}` }}{{ visit.endedAt ? ` - ${visit.endedAt}` : "" }}
+                      </small>
                     </span>
-                    <span class="chip compact" :class="statusTone(visit.status)">
-                      {{ providerVisitStatusLabel(visit.status) }}
+                    <span class="chip compact" :class="statusTone(providerVisitStatusLabel(visit))">
+                      {{ providerVisitStatusLabel(visit) }}
                     </span>
                   </div>
                   <p>{{ visitNoteSummary(visit) }}</p>
@@ -5982,10 +8284,50 @@ function isSageNav(view: ViewName) {
                     <span>{{ visitSourceLabel(visit) }}</span>
                     <span>{{ visitOrderSummary(visit) }}</span>
                   </div>
+                  <p v-if="visitSyncSummary(visit)" class="visit-sync-note">
+                    {{ visitSyncSummary(visit) }}
+                  </p>
+                  <div v-if="visit.assignedScribe || visit.signedSignature" class="encounter-routing-meta">
+                    <span v-if="visit.assignedScribe"><strong>Scribe:</strong> {{ visit.assignedScribe }}</span>
+                    <span v-if="visit.signedSignature"><strong>Signed:</strong> {{ visit.signedSignature.signedAt }}</span>
+                  </div>
+                  <div
+                    v-if="['scheduled', 'provider-in-progress', 'needs-review', 'revision'].includes(visit.status)"
+                    class="encounter-card-actions"
+                  >
+                    <button
+                      v-if="visit.status === 'needs-review'"
+                      class="primary-action compact-action"
+                      type="button"
+                      @click="openEncounterReview(visit)"
+                    >
+                      <Eye :size="15" />
+                      Start Review
+                    </button>
+                    <button
+                      v-else-if="visit.status === 'revision'"
+                      class="soft-action compact-action mock-sync-action"
+                      type="button"
+                      @click="simulateScribeResubmission(visit)"
+                    >
+                      <Undo2 :size="15" />
+                      Simulate Scribe Resubmission
+                      <small>Mock Notes+ sync</small>
+                    </button>
+                    <button
+                      v-else
+                      class="primary-action compact-action"
+                      type="button"
+                      @click="startScheduledEncounter(visit)"
+                    >
+                      <FileText :size="15" />
+                      {{ visit.status === "provider-in-progress" ? "Continue Encounter" : "Start Encounter" }}
+                    </button>
+                  </div>
                 </article>
               </div>
               <p v-else class="empty-copy">
-                No visits documented for this resident yet.
+                No encounters documented for this resident yet.
               </p>
             </section>
           </div>
@@ -6506,38 +8848,43 @@ function isSageNav(view: ViewName) {
       </section>
 
       <section v-else-if="activeView === 'residents'" class="screen">
-        <header class="screen-header">
+        <header class="screen-header residents-screen-header">
           <div>
             <h1>Residents</h1>
             <p>{{ searchedResidents.length }} of {{ filteredResidents.length }} residents · Day shift</p>
           </div>
-          <button
-            class="icon-button search-button"
-            type="button"
-            aria-label="Search residents"
-            @click="residentSearchOpen = !residentSearchOpen"
-          >
-            <Search :size="18" />
-          </button>
+          <div class="screen-header-actions resident-search-wrap" :class="{ 'search-open': residentSearchOpen }">
+            <button
+              v-if="!residentSearchOpen"
+              class="icon-button search-button"
+              type="button"
+              aria-label="Search residents"
+              :aria-expanded="residentSearchOpen"
+              @click="residentSearchOpen = !residentSearchOpen"
+            >
+              <Search :size="18" />
+            </button>
+            <div v-if="residentSearchOpen" class="search-panel header-search-panel">
+              <label class="header-search-field" aria-label="Search residents">
+                <Search :size="17" />
+                <input
+                  v-model="residentSearchQuery"
+                  type="search"
+                  placeholder="Search by resident, room, facility, status, or summary"
+                />
+              </label>
+            </div>
+            <button
+              v-if="residentSearchOpen"
+              class="icon-button search-close-button"
+              type="button"
+              aria-label="Close resident search"
+              @click="residentSearchOpen = false; residentSearchQuery = ''"
+            >
+              <X :size="16" />
+            </button>
+          </div>
         </header>
-
-        <div v-if="residentSearchOpen" class="search-panel content-frame">
-          <Search :size="17" />
-          <input
-            v-model="residentSearchQuery"
-            type="search"
-            placeholder="Search by resident, room, facility, status, or summary"
-          />
-          <button
-            v-if="residentSearchQuery"
-            class="soft-icon"
-            type="button"
-            aria-label="Clear resident search"
-            @click="residentSearchQuery = ''"
-          >
-            <X :size="16" />
-          </button>
-        </div>
 
         <section class="schedule-strip content-frame">
           <article class="panel schedule-panel">
@@ -6549,7 +8896,6 @@ function isSageNav(view: ViewName) {
                 </div>
               </div>
               <div class="schedule-panel-controls">
-                <span class="chip compact schedule-total-chip">{{ visibleScheduleMonthItems.length }} items</span>
                 <button class="primary-action compact-action" type="button" @click="openScheduleModal()">
                   <CalendarDays :size="14" />
                   New Schedule
@@ -6567,7 +8913,7 @@ function isSageNav(view: ViewName) {
               </div>
             </div>
             <div v-if="visibleScheduleMonthItems.length && scheduleView === 'list'" class="schedule-list">
-              <div v-for="item in visibleScheduleMonthItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row">
+              <div v-for="item in visibleScheduleMonthItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row resident-schedule-row">
                 <button class="schedule-row-main" type="button" @click="openScheduleItem(item)">
                   <span class="schedule-icon" :class="item.kind">
                     <Users v-if="item.kind === 'huddle'" :size="17" />
@@ -6576,26 +8922,30 @@ function isSageNav(view: ViewName) {
                     <Clock v-else-if="item.kind === 'follow-up'" :size="17" />
                     <CheckCircle v-else :size="17" />
                   </span>
-                  <span>
+                  <span class="schedule-event-copy">
                     <strong>{{ item.title }}</strong>
                     <small>{{ item.detail }}</small>
                   </span>
-                  <span class="schedule-time">
-                    {{ item.time }}
-                  </span>
-                  <span class="chip compact" :class="scheduleItemTone(item)">
-                    {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
-                  </span>
                 </button>
-                <button
-                  v-if="item.threadId"
-                  class="soft-action compact-action"
-                  type="button"
-                  @click="openScheduleThread(item.threadId)"
-                >
-                  <MessageCircle :size="14" />
-                  Thread
-                </button>
+                <div class="schedule-row-footer">
+                  <span class="schedule-meta">
+                    <span class="schedule-time">
+                      {{ item.time }}
+                    </span>
+                    <span class="chip compact" :class="scheduleItemTone(item)">
+                      {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
+                    </span>
+                  </span>
+                  <button
+                    v-if="item.threadId"
+                    class="soft-action compact-action schedule-thread-action"
+                    type="button"
+                    @click="openScheduleThread(item.threadId)"
+                  >
+                    <MessageCircle :size="14" />
+                    Thread
+                  </button>
+                </div>
               </div>
             </div>
             <div v-else-if="scheduleView === 'calendar'" class="schedule-calendar-month">
@@ -6753,8 +9103,8 @@ function isSageNav(view: ViewName) {
             <p>{{ greeting }} {{ displayFirstName(activeStaffUser.name) }} · {{ filteredResidents.length }} active residents</p>
           </div>
           <div class="header-metric">
-            <strong>{{ filteredProviderOpportunities.length }}</strong>
-            <span>ready to review</span>
+            <strong>{{ dailyProviderEncounters.length }}</strong>
+            <span>encounters today</span>
           </div>
         </header>
 
@@ -6764,50 +9114,51 @@ function isSageNav(view: ViewName) {
               <article class="panel clinical-attention-panel">
                 <div class="notes-panel-header">
                   <div>
-                    <div class="section-label">Daily Visit List</div>
+                    <div class="section-label">Daily Encounter List</div>
                     <h2>Residents to see today</h2>
                   </div>
-                  <span class="chip compact">{{ filteredProviderOpportunities.length }} residents</span>
+                  <span class="chip compact">{{ dailyProviderEncounters.length }} scheduled</span>
                 </div>
 
-                <div v-if="filteredProviderOpportunities.length" class="attention-list daily-visit-cards">
+                <div v-if="dailyProviderEncounters.length" class="attention-list daily-visit-cards">
                   <article
-                    v-for="opportunity in filteredProviderOpportunities"
-                    :key="opportunity.id"
+                    v-for="encounter in dailyProviderEncounters"
+                    :key="encounter.id"
                     class="attention-card daily-visit-card"
                   >
                     <div class="attention-head">
-                      <img class="avatar" :src="opportunity.resident.image" :alt="opportunity.resident.name" />
+                      <img class="avatar" :src="encounterResident(encounter).image" :alt="encounter.residentName" />
                       <div class="attention-head-copy">
                         <div class="attention-title-row">
-                          <strong>{{ opportunity.resident.name }}</strong>
+                          <strong>{{ encounter.residentName }}</strong>
+                          <span class="chip compact" :class="statusTone(providerVisitStatusLabel(encounter))">
+                            {{ providerVisitStatusLabel(encounter) }}
+                          </span>
                         </div>
-                        <small>{{ opportunity.facility }} · Room {{ opportunity.resident.room }}</small>
+                        <small>{{ residentFacility(encounterResident(encounter)) }} · Room {{ encounterResident(encounter).room }}</small>
                       </div>
                     </div>
                     <div class="chip-row daily-visit-status">
-                      <span
-                        v-for="chip in opportunity.resident.statusChips.slice(0, 2)"
-                        :key="chip"
-                        class="chip compact"
-                        :class="statusTone(chip)"
-                      >
-                        {{ chip }}
+                      <span class="chip compact" :class="statusTone(encounter.clinicalPriority)">
+                        {{ encounter.clinicalPriority }} priority
                       </span>
-                      <span class="chip compact" :class="statusTone(opportunity.resident.acuity)">
-                        {{ opportunity.resident.acuity }}
-                      </span>
+                      <span class="chip compact">{{ encounter.scheduledTime }}</span>
+                      <span class="chip compact lavender">{{ encounter.visitType }}</span>
                     </div>
-                    <p>{{ opportunity.resident.situation.summary }}</p>
-                    <div class="delegate-summary daily-visit-next">
-                      <span><strong>What to do next:</strong> {{ opportunity.recommendedAction }}</span>
+                    <div class="daily-visit-reason">
+                      <div class="section-label">Reason for Visit</div>
+                      <strong>{{ encounter.visitReason }}</strong>
+                      <p>{{ encounterResident(encounter).situation.summary }}</p>
+                    </div>
+                    <div class="delegate-summary daily-visit-next daily-visit-baseline">
+                      <span><strong>Change from baseline:</strong> {{ encounter.baselineChange }}</span>
                     </div>
                     <div class="daily-visit-context-grid">
-                      <section v-if="opportunity.resident.situation.concerns.length" class="daily-visit-context-card">
+                      <section v-if="encounterResident(encounter).situation.concerns.length" class="daily-visit-context-card">
                         <div class="section-label">Unresolved Concerns</div>
                         <div class="situation-concern-list compact-context-list">
                           <div
-                            v-for="concern in opportunity.resident.situation.concerns.slice(0, 2)"
+                            v-for="concern in encounterResident(encounter).situation.concerns.slice(0, 2)"
                             :key="concern.title"
                             class="concern-row"
                           >
@@ -6819,11 +9170,11 @@ function isSageNav(view: ViewName) {
                           </div>
                         </div>
                       </section>
-                      <section v-if="opportunity.resident.situation.vitals.length" class="daily-visit-context-card">
+                      <section v-if="encounterResident(encounter).situation.vitals.length" class="daily-visit-context-card">
                         <div class="section-label">Vitals</div>
                         <div class="vital-list watch-vital-list">
                           <div
-                            v-for="vital in opportunity.resident.situation.vitals.slice(0, 3)"
+                            v-for="vital in encounterResident(encounter).situation.vitals.slice(0, 3)"
                             :key="vital.label"
                             class="vital-row compact-vital-row"
                           >
@@ -6844,20 +9195,24 @@ function isSageNav(view: ViewName) {
                         </div>
                       </section>
                     </div>
+                    <div class="daily-visit-source">
+                      <span>Otangeles Notes+ Daily Visit List</span>
+                      <span>{{ encounter.providerName }}</span>
+                    </div>
                     <div class="card-actions clinical-attention-actions">
                       <button
                         class="primary-action compact-action clinical-attention-primary-action"
                         type="button"
-                        @click="startVisitForResident(opportunity.resident)"
+                        @click="startScheduledEncounter(encounter)"
                       >
                         <FileText :size="15" />
-                        Start Visit
+                        {{ encounter.status === "provider-in-progress" ? "Continue Encounter" : "Start Encounter" }}
                       </button>
                     </div>
                   </article>
                 </div>
                 <p v-else class="empty-copy">
-                  No residents need a provider visit for this facility right now.
+                  No scheduled encounters for this facility right now.
                 </p>
               </article>
             </section>
@@ -7203,38 +9558,43 @@ function isSageNav(view: ViewName) {
       </section>
 
       <section v-else-if="activeView === 'provider-residents'" class="screen role-screen">
-        <header class="screen-header">
+        <header class="screen-header residents-screen-header">
           <div>
-            <h1>Provider Residents</h1>
-            <p>{{ searchedProviderResidents.length }} of {{ filteredResidents.length }} residents across assigned facilities</p>
+            <h1>Facility Residents</h1>
+            <p>{{ filteredResidents.length }} residents across assigned facilities</p>
           </div>
-          <button
-            class="icon-button search-button"
-            type="button"
-            aria-label="Search residents"
-            @click="providerResidentSearchOpen = !providerResidentSearchOpen"
-          >
-            <Search :size="18" />
-          </button>
+          <div class="screen-header-actions resident-search-wrap" :class="{ 'search-open': providerResidentSearchOpen }">
+            <button
+              v-if="!providerResidentSearchOpen"
+              class="icon-button search-button"
+              type="button"
+              aria-label="Search residents"
+              :aria-expanded="providerResidentSearchOpen"
+              @click="providerResidentSearchOpen = !providerResidentSearchOpen"
+            >
+              <Search :size="18" />
+            </button>
+            <div v-if="providerResidentSearchOpen" class="search-panel header-search-panel">
+              <label class="header-search-field" aria-label="Search residents">
+                <Search :size="17" />
+                <input
+                  v-model="providerResidentSearchQuery"
+                  type="search"
+                  placeholder="Search by resident, room, facility, condition, or summary"
+                />
+              </label>
+            </div>
+            <button
+              v-if="providerResidentSearchOpen"
+              class="icon-button search-close-button"
+              type="button"
+              aria-label="Close provider resident search"
+              @click="providerResidentSearchOpen = false; providerResidentSearchQuery = ''"
+            >
+              <X :size="16" />
+            </button>
+          </div>
         </header>
-
-        <div v-if="providerResidentSearchOpen" class="search-panel content-frame">
-          <Search :size="17" />
-          <input
-            v-model="providerResidentSearchQuery"
-            type="search"
-            placeholder="Search by resident, room, facility, condition, or summary"
-          />
-          <button
-            v-if="providerResidentSearchQuery"
-            class="soft-icon"
-            type="button"
-            aria-label="Clear provider resident search"
-            @click="providerResidentSearchQuery = ''"
-          >
-            <X :size="16" />
-          </button>
-        </div>
 
         <section class="schedule-strip content-frame">
           <article class="panel schedule-panel">
@@ -7246,7 +9606,6 @@ function isSageNav(view: ViewName) {
                 </div>
               </div>
               <div class="schedule-panel-controls">
-                <span class="chip compact schedule-total-chip">{{ visibleScheduleMonthItems.length }} items</span>
                 <button class="primary-action compact-action" type="button" @click="openScheduleModal()">
                   <CalendarDays :size="14" />
                   New Schedule
@@ -7264,7 +9623,7 @@ function isSageNav(view: ViewName) {
               </div>
             </div>
             <div v-if="visibleScheduleMonthItems.length && scheduleView === 'list'" class="schedule-list">
-              <div v-for="item in visibleScheduleMonthItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row">
+              <div v-for="item in visibleScheduleMonthItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row resident-schedule-row">
                 <button class="schedule-row-main" type="button" @click="openScheduleItem(item)">
                   <span class="schedule-icon" :class="item.kind">
                     <Users v-if="item.kind === 'huddle'" :size="17" />
@@ -7273,26 +9632,30 @@ function isSageNav(view: ViewName) {
                     <Clock v-else-if="item.kind === 'follow-up'" :size="17" />
                     <CheckCircle v-else :size="17" />
                   </span>
-                  <span>
+                  <span class="schedule-event-copy">
                     <strong>{{ item.title }}</strong>
                     <small>{{ item.detail }}</small>
                   </span>
-                  <span class="schedule-time">
-                    {{ item.time }}
-                  </span>
-                  <span class="chip compact" :class="scheduleItemTone(item)">
-                    {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
-                  </span>
                 </button>
-                <button
-                  v-if="item.threadId"
-                  class="soft-action compact-action"
-                  type="button"
-                  @click="openScheduleThread(item.threadId)"
-                >
-                  <MessageCircle :size="14" />
-                  Thread
-                </button>
+                <div class="schedule-row-footer">
+                  <span class="schedule-meta">
+                    <span class="schedule-time">
+                      {{ item.time }}
+                    </span>
+                    <span class="chip compact" :class="scheduleItemTone(item)">
+                      {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
+                    </span>
+                  </span>
+                  <button
+                    v-if="item.threadId"
+                    class="soft-action compact-action schedule-thread-action"
+                    type="button"
+                    @click="openScheduleThread(item.threadId)"
+                  >
+                    <MessageCircle :size="14" />
+                    Thread
+                  </button>
+                </div>
               </div>
             </div>
             <div v-else-if="scheduleView === 'calendar'" class="schedule-calendar-month">
@@ -7818,38 +10181,43 @@ function isSageNav(view: ViewName) {
       </section>
 
       <section v-else-if="activeView === 'cna-residents'" class="screen role-screen">
-        <header class="screen-header">
+        <header class="screen-header residents-screen-header">
           <div>
             <h1>Residents</h1>
             <p>{{ searchedCnaAssignments.length }} of {{ filteredCnaAssignments.length }} assigned residents</p>
           </div>
-          <button
-            class="icon-button search-button"
-            type="button"
-            aria-label="Search assigned residents"
-            @click="cnaResidentSearchOpen = !cnaResidentSearchOpen"
-          >
-            <Search :size="18" />
-          </button>
+          <div class="screen-header-actions resident-search-wrap" :class="{ 'search-open': cnaResidentSearchOpen }">
+            <button
+              v-if="!cnaResidentSearchOpen"
+              class="icon-button search-button"
+              type="button"
+              aria-label="Search assigned residents"
+              :aria-expanded="cnaResidentSearchOpen"
+              @click="cnaResidentSearchOpen = !cnaResidentSearchOpen"
+            >
+              <Search :size="18" />
+            </button>
+            <div v-if="cnaResidentSearchOpen" class="search-panel header-search-panel">
+              <label class="header-search-field" aria-label="Search assigned residents">
+                <Search :size="17" />
+                <input
+                  v-model="cnaResidentSearchQuery"
+                  type="search"
+                  placeholder="Search residents, room, reminder, care, or watch item"
+                />
+              </label>
+            </div>
+            <button
+              v-if="cnaResidentSearchOpen"
+              class="icon-button search-close-button"
+              type="button"
+              aria-label="Close CNA resident search"
+              @click="cnaResidentSearchOpen = false; cnaResidentSearchQuery = ''"
+            >
+              <X :size="16" />
+            </button>
+          </div>
         </header>
-
-        <div v-if="cnaResidentSearchOpen" class="search-panel content-frame">
-          <Search :size="17" />
-          <input
-            v-model="cnaResidentSearchQuery"
-            type="search"
-            placeholder="Search residents, room, reminder, care, or watch item"
-          />
-          <button
-            v-if="cnaResidentSearchQuery"
-            class="soft-icon"
-            type="button"
-            aria-label="Clear CNA resident search"
-            @click="cnaResidentSearchQuery = ''"
-          >
-            <X :size="16" />
-          </button>
-        </div>
 
         <section class="schedule-strip content-frame">
           <article class="panel schedule-panel">
@@ -7861,7 +10229,6 @@ function isSageNav(view: ViewName) {
                 </div>
               </div>
               <div class="schedule-panel-controls">
-                <span class="chip compact schedule-total-chip">{{ visibleScheduleMonthItems.length }} items</span>
                 <button class="primary-action compact-action" type="button" @click="openScheduleModal()">
                   <CalendarDays :size="14" />
                   New Schedule
@@ -7879,7 +10246,7 @@ function isSageNav(view: ViewName) {
               </div>
             </div>
             <div v-if="visibleScheduleMonthItems.length && scheduleView === 'list'" class="schedule-list">
-              <div v-for="item in visibleScheduleMonthItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row">
+              <div v-for="item in visibleScheduleMonthItems.slice(0, 6)" :key="`${item.kind}-${item.id}`" class="schedule-row resident-schedule-row">
                 <button class="schedule-row-main" type="button" @click="openScheduleItem(item)">
                   <span class="schedule-icon" :class="item.kind">
                     <Users v-if="item.kind === 'huddle'" :size="17" />
@@ -7888,26 +10255,30 @@ function isSageNav(view: ViewName) {
                     <Clock v-else-if="item.kind === 'follow-up'" :size="17" />
                     <CheckCircle v-else :size="17" />
                   </span>
-                  <span>
+                  <span class="schedule-event-copy">
                     <strong>{{ item.title }}</strong>
                     <small>{{ item.detail }}</small>
                   </span>
-                  <span class="schedule-time">
-                    {{ item.time }}
-                  </span>
-                  <span class="chip compact" :class="scheduleItemTone(item)">
-                    {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
-                  </span>
                 </button>
-                <button
-                  v-if="item.threadId"
-                  class="soft-action compact-action"
-                  type="button"
-                  @click="openScheduleThread(item.threadId)"
-                >
-                  <MessageCircle :size="14" />
-                  Thread
-                </button>
+                <div class="schedule-row-footer">
+                  <span class="schedule-meta">
+                    <span class="schedule-time">
+                      {{ item.time }}
+                    </span>
+                    <span class="chip compact" :class="scheduleItemTone(item)">
+                      {{ item.kind === "order" ? orderStatusForScheduleItem(item).replaceAll("-", " ") : item.kind }}
+                    </span>
+                  </span>
+                  <button
+                    v-if="item.threadId"
+                    class="soft-action compact-action schedule-thread-action"
+                    type="button"
+                    @click="openScheduleThread(item.threadId)"
+                  >
+                    <MessageCircle :size="14" />
+                    Thread
+                  </button>
+                </div>
               </div>
             </div>
             <div v-else-if="scheduleView === 'calendar'" class="schedule-calendar-month">
@@ -7986,54 +10357,99 @@ function isSageNav(view: ViewName) {
 
       <section v-else-if="isMessagesView" class="screen messages-screen">
         <template v-if="selectedThread">
-          <header class="screen-header thread-header">
-            <button class="icon-button" type="button" aria-label="Back to messages" @click="closeThread">
-              <ArrowLeft :size="19" />
-            </button>
-            <div v-if="selectedThread.kind === 'huddle'" class="huddle-avatar">
-              <Users :size="17" />
+          <header
+            class="screen-header thread-header"
+            :class="{ 'compact-thread-header': !threadResident(selectedThread) }"
+          >
+            <div class="thread-header-main">
+              <button class="icon-button" type="button" aria-label="Back to messages" @click="closeThread">
+                <ArrowLeft :size="19" />
+              </button>
+              <img
+                v-if="threadResident(selectedThread)"
+                class="avatar"
+                :src="threadResident(selectedThread)?.image"
+                :alt="threadDisplayTitle(selectedThread)"
+              />
+              <div v-else-if="selectedThread.kind === 'huddle'" class="huddle-avatar">
+                <Users :size="17" />
+              </div>
+              <div v-else class="staff-avatar" aria-hidden="true">
+                <component :is="threadIcon(selectedThread)" :size="18" />
+              </div>
+              <div class="title-stack">
+                <h1>{{ threadDisplayTitle(selectedThread) }}</h1>
+                <p>
+                  <template v-if="threadResident(selectedThread)">
+                    Room {{ threadResident(selectedThread)?.room }} · Resident care team · {{ selectedThread.members.length }} members
+                  </template>
+                  <template v-else>
+                    {{ selectedThread.kind === "huddle" ? `${selectedThread.members.length} member staff group` : "Direct message" }}
+                  </template>
+                </p>
+              </div>
             </div>
-            <div v-else class="staff-avatar" aria-hidden="true">
-              <component :is="threadIcon(selectedThread)" :size="18" />
-            </div>
-            <div class="title-stack">
-              <h1>{{ selectedThread.title }}</h1>
-              <p>
-                {{ selectedThread.kind === "huddle" ? `Huddle · ${selectedThread.members.length} members` : "Direct message" }}
-              </p>
-            </div>
-            <button class="icon-button" type="button" aria-label="Call" @click="startThreadCall('voice-call')">
-              <Phone :size="18" />
-            </button>
-            <button class="icon-button" type="button" aria-label="Video" @click="startThreadCall('video-call')">
-              <Video :size="18" />
-            </button>
-            <button
-              class="icon-button"
-              type="button"
-              aria-label="Thread menu"
-              @click="threadMenuOpen = !threadMenuOpen"
+            <div
+              class="thread-header-actions"
+              :class="{ 'compact-thread-actions': !threadResident(selectedThread) }"
             >
-              <MoreVertical :size="18" />
-            </button>
-          </header>
+              <button
+                v-if="threadResident(selectedThread)"
+                class="soft-action compact-action thread-context-action"
+                type="button"
+                @click="openSelectedThreadResident"
+              >
+                <UserIcon :size="15" />
+                View Resident
+              </button>
+              <button
+                v-if="threadResident(selectedThread)"
+                class="soft-action compact-action thread-context-action"
+                type="button"
+                @click="scheduleSelectedThreadHuddle"
+              >
+                <CalendarDays :size="15" />
+                Schedule Huddle
+              </button>
+              <button class="icon-button" type="button" aria-label="Start voice call" @click="startThreadCall('voice-call')">
+                <Phone :size="18" />
+              </button>
+              <button class="icon-button" type="button" aria-label="Start video call" @click="startThreadCall('video-call')">
+                <Video :size="18" />
+              </button>
+              <div class="thread-menu-wrap">
+                <button
+                  class="icon-button"
+                  type="button"
+                  aria-label="Thread menu"
+                  :aria-expanded="threadMenuOpen"
+                  @click="toggleThreadMenu"
+                >
+                  <MoreVertical :size="18" />
+                </button>
 
-          <div v-if="threadMenuOpen" class="thread-menu panel">
-            <button type="button"><FileText :size="16" /> View summary</button>
-            <button type="button"><Mic :size="16" /> View transcription</button>
-            <button type="button"><Zap :size="16" /> View insight</button>
-            <button v-if="selectedRole === 'don'" type="button" @click="openActionRequestFromThread">
-              <Send :size="16" />
-              Assign action
-            </button>
-          </div>
+                <div v-if="threadMenuOpen" class="thread-menu panel">
+                  <button type="button" @click="openThreadSummary"><FileText :size="16" /> View summary</button>
+                  <button type="button" @click="openThreadInsight"><Zap :size="16" /> View Insight</button>
+                  <button v-if="canRenameThread(selectedThread)" type="button" @click="openThreadRenameModal">
+                    <Edit3 :size="16" />
+                    Rename huddle
+                  </button>
+                  <button v-if="selectedRole === 'don'" type="button" @click="openActionRequestFromThread">
+                    <Send :size="16" />
+                    Assign action
+                  </button>
+                </div>
+              </div>
+            </div>
+          </header>
 
           <div class="message-stream thread-stream">
             <div
               v-for="message in threadMessages"
               :key="message.id"
               class="thread-message"
-              :class="{ me: message.authorId === 'me', event: message.kind === 'voice-call' || message.kind === 'video-call' }"
+              :class="{ me: isCurrentUser(message.authorId), event: message.kind === 'voice-call' || message.kind === 'video-call' }"
             >
               <template v-if="message.kind === 'voice-call' || message.kind === 'video-call'">
                 <span class="call-chip">
@@ -8041,13 +10457,17 @@ function isSageNav(view: ViewName) {
                   <Phone v-else :size="14" />
                   {{ message.kind === 'video-call' ? 'Video call' : 'Voice call' }}
                   <small v-if="message.duration">· {{ message.duration }}</small>
+                  <button class="call-transcription-action" type="button" @click.stop="openThreadTranscription(message)">
+                    <Mic :size="13" />
+                    View transcription
+                  </button>
                 </span>
               </template>
               <template v-else>
-                <small v-if="selectedThread.kind === 'huddle' && message.authorId !== 'me'">
+                <small v-if="selectedThread.kind === 'huddle' && !isCurrentUser(message.authorId)">
                   {{ authorName(message.authorId) }}
                 </small>
-                <div class="bubble" :class="message.authorId === 'me' ? 'me' : 'sage'">
+                <div class="bubble" :class="isCurrentUser(message.authorId) ? 'me' : 'sage'">
                   {{ message.text }}
                 </div>
                 <time>{{ message.ts }}</time>
@@ -8067,10 +10487,41 @@ function isSageNav(view: ViewName) {
         </template>
 
         <template v-else>
-          <header class="screen-header">
+          <header class="screen-header residents-screen-header">
             <div>
               <h1>{{ messageHeader.title }}</h1>
               <p>{{ messageHeader.subtitle }}</p>
+            </div>
+            <div class="screen-header-actions resident-search-wrap" :class="{ 'search-open': messageSearchOpen }">
+              <button
+                v-if="!messageSearchOpen"
+                class="icon-button search-button"
+                type="button"
+                aria-label="Search messages"
+                :aria-expanded="messageSearchOpen"
+                @click="messageSearchOpen = !messageSearchOpen"
+              >
+                <Search :size="18" />
+              </button>
+              <div v-if="messageSearchOpen" class="search-panel header-search-panel">
+                <label class="header-search-field" aria-label="Search messages">
+                  <Search :size="17" />
+                  <input
+                    v-model="messageSearchQuery"
+                    type="search"
+                    placeholder="Search rooms, people, or message content"
+                  />
+                </label>
+              </div>
+              <button
+                v-if="messageSearchOpen"
+                class="icon-button search-close-button"
+                type="button"
+                aria-label="Close message search"
+                @click="messageSearchOpen = false; messageSearchQuery = ''"
+              >
+                <X :size="16" />
+              </button>
             </div>
           </header>
 
@@ -8078,27 +10529,66 @@ function isSageNav(view: ViewName) {
             <div class="segmented-tabs message-tabs content-frame">
               <button
                 type="button"
-                :class="{ active: messageTab === 'threads' }"
-                @click="messageTab = 'threads'"
+                :class="{ active: messageTab === 'rooms' }"
+                @click="messageTab = 'rooms'"
               >
-                Threads
+                Resident Rooms
               </button>
               <button
                 type="button"
-                :class="{ active: messageTab === 'new' }"
-                @click="messageTab = 'new'; selectedUserIds = []"
+                :class="{ active: messageTab === 'people' }"
+                @click="messageTab = 'people'; selectedUserIds = []"
               >
-                New
+                People
               </button>
             </div>
           </div>
 
-          <div v-if="messageTab === 'threads'" class="thread-list">
+          <div v-if="messageTab === 'rooms'" class="thread-list">
             <button
-              v-for="thread in visibleThreads"
+              v-for="thread in searchedResidentRoomThreads"
               :key="thread.id"
               type="button"
-              class="thread-row"
+              class="thread-row resident-room-row"
+              @click="openThread(thread)"
+            >
+              <img
+                v-if="threadResident(thread)"
+                class="avatar"
+                :src="threadResident(thread)?.image"
+                :alt="threadDisplayTitle(thread)"
+              />
+              <div v-else class="huddle-avatar">
+                <Users :size="17" />
+              </div>
+              <span class="thread-copy">
+                <strong>{{ threadDisplayTitle(thread) }}</strong>
+                <small>{{ threadSubtitle(thread) }}</small>
+                <small
+                  class="thread-last-message"
+                  :class="{ 'thread-search-match': threadSearchMessagePreview(thread, messageSearchQuery) }"
+                >
+                  {{ threadSearchMessagePreview(thread, messageSearchQuery) ?? thread.lastMessage }}
+                </small>
+              </span>
+              <time>{{ thread.lastTs }}</time>
+              <b v-if="thread.unread">{{ thread.unread }}</b>
+            </button>
+            <article v-if="!searchedResidentRoomThreads.length" class="empty-state panel">
+              <Search v-if="messageSearchQuery.trim()" :size="18" />
+              <Users v-else :size="18" />
+              <strong>{{ messageSearchQuery.trim() ? 'No matching resident rooms' : 'No resident rooms yet' }}</strong>
+              <p v-if="messageSearchQuery.trim()">Try a resident name, room, facility, status, or message text.</p>
+              <p v-else>Open a resident profile or schedule a huddle to start a care-team room.</p>
+            </article>
+          </div>
+
+          <div v-else class="thread-list">
+            <button
+              v-for="thread in searchedPeopleThreads"
+              :key="thread.id"
+              type="button"
+              class="thread-row people-thread-row"
               @click="openThread(thread)"
             >
               <div v-if="thread.kind === 'huddle'" class="huddle-avatar">
@@ -8107,18 +10597,21 @@ function isSageNav(view: ViewName) {
               <div v-else class="staff-avatar" aria-hidden="true">
                 <component :is="threadIcon(thread)" :size="18" />
               </div>
-              <span>
-                <strong>{{ thread.title }}</strong>
-                <small>{{ thread.lastMessage }}</small>
+              <span class="thread-copy">
+                <strong>{{ threadDisplayTitle(thread) }}</strong>
+                <small>{{ threadSubtitle(thread) }}</small>
+                <small
+                  class="thread-last-message"
+                  :class="{ 'thread-search-match': threadSearchMessagePreview(thread, messageSearchQuery) }"
+                >
+                  {{ threadSearchMessagePreview(thread, messageSearchQuery) ?? thread.lastMessage }}
+                </small>
               </span>
               <time>{{ thread.lastTs }}</time>
               <b v-if="thread.unread">{{ thread.unread }}</b>
             </button>
-          </div>
-
-          <div v-else class="thread-list">
-            <div class="list-helper">
-              {{ selectedUserIds.length ? `${selectedUserIds.length} selected` : 'Start a new conversation' }}
+            <div v-if="searchedPeopleThreads.length || searchedMessageUsers.length" class="list-helper">
+              {{ selectedUserIds.length ? `${selectedUserIds.length} selected` : 'Start a direct message or group chat' }}
             </div>
             <div v-if="selectedUserIds.length" class="group-action-bar">
               <button class="soft-action compact-action" type="button" @click="startGroupConversation('message')">
@@ -8135,7 +10628,7 @@ function isSageNav(view: ViewName) {
               </button>
             </div>
             <div
-              v-for="user in sortedUsers"
+              v-for="user in searchedMessageUsers"
               :key="user.id"
               class="thread-row user-row"
               :class="{ selected: selectedUserIds.includes(user.id) }"
@@ -8145,28 +10638,48 @@ function isSageNav(view: ViewName) {
               @keydown.enter.prevent="toggleUserSelection(user.id)"
               @keydown.space.prevent="toggleUserSelection(user.id)"
             >
+              <label class="user-select-checkbox" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedUserIds.includes(user.id)"
+                  :aria-label="`Select ${user.name}`"
+                  @change.stop="toggleUserSelection(user.id)"
+                  @keydown.stop
+                />
+                <span aria-hidden="true">
+                  <Check :size="13" />
+                </span>
+              </label>
               <span class="avatar-wrap">
                 <span class="staff-avatar" aria-hidden="true">
                   <component :is="careUserIcon(user)" :size="18" />
                 </span>
                 <span class="presence" :class="user.presence" />
               </span>
-              <span>
+              <span class="user-row-copy">
                 <strong>{{ user.name }}</strong>
-                <small>{{ user.role }} · {{ presenceText(user) }}</small>
+                <small>{{ normalizeSystemRole(user.role) }} · {{ presenceText(user) }}</small>
               </span>
               <div class="user-row-actions">
-              <button class="soft-icon" type="button" aria-label="Open direct message" @click.stop="openDirectMessage(user)">
-                <MessageCircle :size="16" />
-              </button>
-              <button class="soft-icon" type="button" aria-label="Start voice call" @click.stop="openDirectMessage(user, 'voice-call')">
-                <Phone :size="16" />
-              </button>
-              <button class="soft-icon" type="button" aria-label="Start video call" @click.stop="openDirectMessage(user, 'video-call')">
-                <Video :size="16" />
-              </button>
+                <button class="soft-icon" type="button" aria-label="Open direct message" @click.stop="openDirectMessage(user)">
+                  <MessageCircle :size="16" />
+                </button>
+                <button class="soft-icon" type="button" aria-label="Start voice call" @click.stop="openDirectMessage(user, 'voice-call')">
+                  <Phone :size="16" />
+                </button>
+                <button class="soft-icon" type="button" aria-label="Start video call" @click.stop="openDirectMessage(user, 'video-call')">
+                  <Video :size="16" />
+                </button>
               </div>
             </div>
+            <article
+              v-if="!searchedPeopleThreads.length && !searchedMessageUsers.length"
+              class="empty-state panel"
+            >
+              <Search :size="18" />
+              <strong>No matching people or conversations</strong>
+              <p>Try a name, role, department, facility, or message text.</p>
+            </article>
           </div>
         </template>
       </section>
@@ -8187,14 +10700,18 @@ function isSageNav(view: ViewName) {
               </span>
               <div>
                 <div class="section-label">Profile Information</div>
-                <h2>{{ activeProfile.fullName }}</h2>
-                <p>Identity is managed by the organization. Contact and specialty fields can be edited here.</p>
+                <h2>{{ activeProfileDisplayName }}</h2>
+                <p>Name and contact details can be edited here. Role access remains read-only.</p>
               </div>
             </div>
             <div class="modal-form settings-form">
               <label>
-                Full Name
-                <input v-model="activeProfile.fullName" type="text" readonly />
+                First Name
+                <input v-model="activeProfile.firstName" type="text" />
+              </label>
+              <label>
+                Last Name
+                <input v-model="activeProfile.lastName" type="text" />
               </label>
               <label>
                 Email Address
@@ -8204,17 +10721,9 @@ function isSageNav(view: ViewName) {
                 Phone Number
                 <input v-model="activeProfile.phone" type="tel" />
               </label>
-              <label>
+              <label class="form-field-full">
                 System Role
                 <input v-model="activeProfile.systemRole" type="text" readonly />
-              </label>
-              <label>
-                Department
-                <input v-model="activeProfile.department" type="text" />
-              </label>
-              <label>
-                Specialization
-                <input v-model="activeProfile.specialization" type="text" />
               </label>
             </div>
             <div class="settings-card-actions">
@@ -8222,6 +10731,103 @@ function isSageNav(view: ViewName) {
               <button class="primary-action compact-action" type="button" @click="applyProfileChanges">
                 <Check :size="16" />
                 Apply changes
+              </button>
+            </div>
+          </article>
+
+          <article
+            v-if="selectedRole === 'provider'"
+            id="provider-signature-settings"
+            class="panel settings-card settings-card-wide provider-signature-card"
+          >
+            <div class="settings-detail-head">
+              <Signature :size="22" />
+              <div>
+                <div class="section-label">Encounter Signature</div>
+                <h2>{{ currentProviderSignature ? "Signature on file" : "Set up your signature" }}</h2>
+                <p>Create the signature shown when you confirm and sign a reviewed encounter.</p>
+              </div>
+            </div>
+
+            <div v-if="currentProviderSignature" class="saved-signature-preview">
+              <div class="section-label">Current Signature</div>
+              <strong v-if="currentProviderSignature.method === 'type'" class="typed-signature-preview">
+                {{ currentProviderSignature.typedName }}
+              </strong>
+              <img
+                v-else
+                :src="currentProviderSignature.dataUrl"
+                :alt="`${activeProfileDisplayName} signature`"
+              />
+              <small>{{ currentProviderSignature.method }} signature · Saved {{ currentProviderSignature.savedAt }}</small>
+            </div>
+
+            <div class="signature-mode-tabs segmented-tabs" role="tablist" aria-label="Signature method">
+              <button type="button" :class="{ active: signatureMode === 'draw' }" @click="setSignatureMode('draw')">
+                <Edit3 :size="15" /> Draw
+              </button>
+              <button type="button" :class="{ active: signatureMode === 'type' }" @click="setSignatureMode('type')">
+                <Signature :size="15" /> Type
+              </button>
+              <button type="button" :class="{ active: signatureMode === 'upload' }" @click="setSignatureMode('upload')">
+                <Upload :size="15" /> Upload
+              </button>
+            </div>
+
+            <div v-if="signatureMode === 'draw'" class="signature-method-panel">
+              <div class="signature-method-copy">
+                <span><strong>Draw your signature</strong><small>Use a mouse, stylus, or finger.</small></span>
+                <button class="soft-action compact-action" type="button" @click="clearSignatureCanvas">
+                  <Trash2 :size="14" /> Clear
+                </button>
+              </div>
+              <canvas
+                ref="signatureCanvas"
+                class="signature-canvas"
+                width="680"
+                height="220"
+                aria-label="Draw provider signature"
+                @pointerdown.prevent="beginSignatureDrawing"
+                @pointermove.prevent="drawSignature"
+                @pointerup.prevent="endSignatureDrawing"
+                @pointercancel.prevent="endSignatureDrawing"
+                @pointerleave="endSignatureDrawing"
+              />
+            </div>
+
+            <div v-else-if="signatureMode === 'type'" class="signature-method-panel">
+              <label class="signature-type-field">
+                Type your name
+                <input v-model="signatureTypedName" type="text" :placeholder="activeProfileDisplayName" />
+              </label>
+              <div class="typed-signature-stage">
+                <span>{{ signatureTypedName || activeProfileDisplayName }}</span>
+              </div>
+            </div>
+
+            <div v-else class="signature-method-panel">
+              <label class="signature-upload-drop">
+                <Upload :size="24" />
+                <span><strong>Choose a signature image</strong><small>PNG, JPEG, or WebP · 2 MB maximum</small></span>
+                <input type="file" accept="image/png,image/jpeg,image/webp" @change="handleSignatureUpload" />
+              </label>
+              <div v-if="signatureUploadPreview" class="signature-upload-preview">
+                <img :src="signatureUploadPreview" alt="Uploaded signature preview" />
+              </div>
+            </div>
+
+            <p v-if="signatureError" class="signature-feedback error" role="alert">{{ signatureError }}</p>
+            <p v-if="signatureSavedMessage" class="signature-feedback success" role="status">{{ signatureSavedMessage }}</p>
+
+            <div class="signature-settings-actions">
+              <button v-if="currentProviderSignature" class="soft-action" type="button" @click="removeProviderSignature">
+                <Trash2 :size="15" /> Remove Signature
+              </button>
+              <button class="soft-action" type="button" @click="resetMockEncounterWorkflow">
+                <Undo2 :size="15" /> Reset Mock Encounters
+              </button>
+              <button class="primary-action" type="button" @click="saveProviderSignature">
+                <Check :size="16" /> Save Signature
               </button>
             </div>
           </article>
@@ -8451,7 +11057,7 @@ function isSageNav(view: ViewName) {
                 <div class="section-label">Account</div>
                 <button type="button" :class="{ active: activeSettingsPanel === 'profile' }" @click="openSettingsPanel('profile')">
                   <UserIcon :size="17" />
-                  <span>Profile Information <small>Name, contact, department, and specialization</small></span>
+                  <span>Profile Information <small>Name and contact details</small></span>
                   <ChevronRight :size="16" />
                 </button>
                 <button type="button" :class="{ active: activeSettingsPanel === 'credentials' }" @click="openSettingsPanel('credentials')">
@@ -8535,13 +11141,17 @@ function isSageNav(view: ViewName) {
                   <div>
                     <div class="section-label">Account</div>
                     <h2>Profile Information</h2>
-                    <p>Core identity fields are controlled by your organization. Contact details can be updated here.</p>
+                    <p>Name and contact details can be updated here. Role access remains read-only.</p>
                   </div>
                 </div>
                 <div class="modal-form settings-form">
                   <label>
-                    Full Name
-                    <input v-model="activeProfile.fullName" type="text" readonly />
+                    First Name
+                    <input v-model="activeProfile.firstName" type="text" />
+                  </label>
+                  <label>
+                    Last Name
+                    <input v-model="activeProfile.lastName" type="text" />
                   </label>
                   <label>
                     Email Address
@@ -8551,17 +11161,9 @@ function isSageNav(view: ViewName) {
                     Phone Number
                     <input v-model="activeProfile.phone" type="tel" />
                   </label>
-                  <label>
+                  <label class="form-field-full">
                     System Role
                     <input v-model="activeProfile.systemRole" type="text" readonly />
-                  </label>
-                  <label>
-                    Department
-                    <input v-model="activeProfile.department" type="text" />
-                  </label>
-                  <label>
-                    Specialization
-                    <input v-model="activeProfile.specialization" type="text" />
                   </label>
                 </div>
                 <div class="settings-card-actions">
@@ -8606,7 +11208,7 @@ function isSageNav(view: ViewName) {
                     <p>Password values are not stored in this frontend workspace.</p>
                   </div>
                 </div>
-                <div class="modal-form settings-form">
+                <div class="modal-form settings-form compact-settings-form">
                   <label>
                     Current Password
                     <input v-model="passwordDraft.current" type="password" />
@@ -8684,8 +11286,6 @@ function isSageNav(view: ViewName) {
                 </div>
                 <div class="delegate-summary">
                   <span><strong>Role:</strong> {{ activeProfile.systemRole }}</span>
-                  <span><strong>Department:</strong> {{ activeProfile.department }}</span>
-                  <span><strong>Specialization:</strong> {{ activeProfile.specialization }}</span>
                   <span><strong>Status:</strong> Verified for assigned facilities</span>
                 </div>
               </template>
@@ -8808,11 +11408,15 @@ function isSageNav(view: ViewName) {
 
         <template v-if="profileModal === 'profile'">
           <h2>Profile Information</h2>
-          <p>Core identity fields are controlled by your organization. Contact details can be updated here.</p>
+          <p>Name and contact details can be updated here. Role access remains read-only.</p>
           <div class="modal-form">
             <label>
-              Full Name
-              <input v-model="activeProfile.fullName" type="text" readonly />
+              First Name
+              <input v-model="activeProfile.firstName" type="text" />
+            </label>
+            <label>
+              Last Name
+              <input v-model="activeProfile.lastName" type="text" />
             </label>
             <label>
               Email Address
@@ -8822,17 +11426,9 @@ function isSageNav(view: ViewName) {
               Phone Number
               <input v-model="activeProfile.phone" type="tel" />
             </label>
-            <label>
+            <label class="form-field-full">
               System Role
               <input v-model="activeProfile.systemRole" type="text" readonly />
-            </label>
-            <label>
-              Department
-              <input v-model="activeProfile.department" type="text" />
-            </label>
-            <label>
-              Specialization
-              <input v-model="activeProfile.specialization" type="text" />
             </label>
           </div>
           <span class="form-hint">Last applied: {{ profileChangesAppliedAt[selectedRole] }}</span>
@@ -8867,7 +11463,7 @@ function isSageNav(view: ViewName) {
         <template v-else-if="profileModal === 'change-password'">
           <h2>Change Password</h2>
           <p>This is mock-only. Password values are not stored.</p>
-          <div class="modal-form">
+          <div class="modal-form compact-settings-form">
             <label>
               Current Password
               <input v-model="passwordDraft.current" type="password" />
@@ -8934,8 +11530,6 @@ function isSageNav(view: ViewName) {
           <p>Role credentials are mocked for this prototype.</p>
           <div class="delegate-summary">
             <span><strong>Role:</strong> {{ activeProfile.systemRole }}</span>
-            <span><strong>Department:</strong> {{ activeProfile.department }}</span>
-            <span><strong>Specialization:</strong> {{ activeProfile.specialization }}</span>
             <span><strong>Status:</strong> Verified for assigned facilities</span>
           </div>
           <button class="primary-action" type="button" @click="closeProfileModal">
@@ -9150,18 +11744,205 @@ function isSageNav(view: ViewName) {
       </article>
     </div>
 
+    <div v-if="revisionModalSection" class="modal-backdrop" @click="closeRevisionCommentModal">
+      <article class="modal-card profile-modal revision-comment-modal" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeRevisionCommentModal">
+          <X :size="18" />
+        </button>
+        <div class="revision-modal-heading">
+          <div class="modal-title-icon"><MessageSquarePlus :size="20" /></div>
+          <div>
+            <h2>{{ revisionModalThreadId ? "Edit Revision Comment" : "Add Revision Comment" }}</h2>
+            <p>Request a correction to the <strong>{{ revisionModalSection.title }}</strong> section.</p>
+          </div>
+        </div>
+        <form class="revision-comment-form" @submit.prevent="submitRevisionComment">
+          <label class="modal-text-field">
+            <span>Comment Description</span>
+            <textarea v-model="revisionModalText" rows="4" placeholder="Describe what the Scribe should revise..." autofocus />
+          </label>
+          <div class="modal-actions revision-modal-actions">
+            <button class="soft-action" type="button" @click="closeRevisionCommentModal">Cancel</button>
+            <button class="primary-action" type="submit" :disabled="!revisionModalText.trim()">
+              <Send :size="16" /> Submit
+            </button>
+          </div>
+        </form>
+      </article>
+    </div>
+
+    <div v-if="signatureSetupPromptOpen" class="modal-backdrop" @click="signatureSetupPromptOpen = false">
+      <article class="modal-card signature-required-modal" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="signatureSetupPromptOpen = false">
+          <X :size="18" />
+        </button>
+        <span class="signature-modal-icon"><Signature :size="24" /></span>
+        <h2>Set up your signature first</h2>
+        <p>A saved provider signature is required before this encounter can be signed and submitted to billing.</p>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="signatureSetupPromptOpen = false">Cancel</button>
+          <button class="primary-action" type="button" @click="goToSignatureSettings">
+            <Settings :size="16" /> Set Up Signature
+          </button>
+        </div>
+      </article>
+    </div>
+
+    <div
+      v-if="signEncounterConfirmOpen && activeReviewEncounter && currentProviderSignature"
+      class="modal-backdrop"
+      @click="signEncounterConfirmOpen = false"
+    >
+      <article class="modal-card sign-encounter-modal" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="signEncounterConfirmOpen = false">
+          <X :size="18" />
+        </button>
+        <span class="signature-modal-icon success"><Signature :size="24" /></span>
+        <h2>Confirm Encounter Signature</h2>
+        <p>Review the signature that will be attached to {{ activeReviewEncounter.residentName }}'s encounter.</p>
+        <div class="signature-confirm-preview">
+          <strong v-if="currentProviderSignature.method === 'type'" class="typed-signature-preview">
+            {{ currentProviderSignature.typedName }}
+          </strong>
+          <img v-else :src="currentProviderSignature.dataUrl" :alt="`${activeProfileDisplayName} signature`" />
+          <span>{{ activeStaffUser.name }}</span>
+          <small>{{ activeReviewEncounter.visitType }} · {{ activeReviewEncounter.sections.length }} verified sections</small>
+        </div>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="signEncounterConfirmOpen = false">Cancel</button>
+          <button class="primary-action" type="button" @click="confirmEncounterSignature">
+            <Signature :size="16" /> Confirm & Sign
+          </button>
+        </div>
+      </article>
+    </div>
+
+    <div v-if="startEncounterResident" class="modal-backdrop" @click="closeStartEncounterModal">
+      <article class="modal-card profile-modal" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeStartEncounterModal">
+          <X :size="18" />
+        </button>
+        <h2>Start Encounter</h2>
+        <p>Select the encounter visit type before opening the note for {{ startEncounterResident.name }}.</p>
+        <div class="delegate-summary">
+          <span><strong>Resident:</strong> {{ startEncounterResident.name }}</span>
+          <span><strong>Location:</strong> Room {{ startEncounterResident.room }} · {{ residentFacility(startEncounterResident) }}</span>
+        </div>
+        <div class="modal-form">
+          <label>
+            Encounter Type
+            <AppSelect
+              v-model="startEncounterDraft.visitType"
+              :options="visitTypeSelectOptions"
+              aria-label="Select encounter type"
+            />
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="closeStartEncounterModal">
+            Cancel
+          </button>
+          <button class="primary-action" type="button" @click="submitStartEncounterModal">
+            <FileText :size="16" />
+            Start Encounter
+          </button>
+        </div>
+      </article>
+    </div>
+
     <div v-if="visitStopConfirmOpen && activeProviderVisit" class="modal-backdrop" @click="visitStopConfirmOpen = false">
       <article class="modal-card" @click.stop>
         <button class="icon-button close-modal" type="button" aria-label="Close" @click="visitStopConfirmOpen = false">
           <X :size="18" />
         </button>
-        <h2>Stop visit?</h2>
-        <p>This will save the current visit note for {{ activeProviderVisit.residentName }} and return to Visit Notes.</p>
+        <h2>End encounter?</h2>
+        <p>This will save the current encounter note for {{ activeProviderVisit.residentName }}, sync it to Otangeles Notes+, and return to Encounter Notes.</p>
         <div class="modal-actions">
           <button class="soft-action" type="button" @click="visitStopConfirmOpen = false">Cancel</button>
           <button class="danger-action" type="button" @click="confirmStopVisit">
             <X :size="16" />
-            Stop Visit
+            End Encounter
+          </button>
+        </div>
+      </article>
+    </div>
+
+    <div v-if="threadRenameModalOpen" class="modal-backdrop" @click="closeThreadRenameModal">
+      <article class="modal-card thread-rename-modal" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeThreadRenameModal">
+          <X :size="18" />
+        </button>
+        <h2>Rename Huddle</h2>
+        <p>Update the group chat title for this care-team huddle.</p>
+        <div class="modal-form">
+          <label>
+            Huddle Name
+            <input v-model="threadRenameDraft" type="text" />
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="closeThreadRenameModal">
+            Cancel
+          </button>
+          <button class="primary-action" type="button" :disabled="!threadRenameDraft.trim()" @click="saveThreadRename">
+            Save
+          </button>
+        </div>
+      </article>
+    </div>
+
+    <div v-if="threadUtilityModal && selectedThread" class="modal-backdrop" @click="closeThreadUtilityModal">
+      <article class="modal-card profile-modal thread-utility-modal" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeThreadUtilityModal">
+          <X :size="18" />
+        </button>
+        <h2>{{ threadUtilityTitle }}</h2>
+        <p>{{ threadUtilityIntro }}</p>
+        <div class="context-chip-row">
+          <span class="chip compact">{{ threadDisplayTitle(selectedThread) }}</span>
+          <span v-if="threadUtilityResident" class="chip warning">Room {{ threadUtilityResident.room }}</span>
+          <span class="chip compact">{{ threadUtilityParticipantNames.length }} members</span>
+        </div>
+
+        <div v-if="threadUtilityModal === 'summary'" class="thread-utility-section">
+          <div class="section-label">Summary</div>
+          <ul class="thread-utility-list">
+            <li v-for="point in threadSummaryPoints" :key="point">{{ point }}</li>
+          </ul>
+          <div v-if="threadUtilityLatestMessages.length" class="thread-utility-section">
+            <div class="section-label">Latest Messages</div>
+            <div class="thread-utility-message-list">
+              <article v-for="message in threadUtilityLatestMessages" :key="`summary-${message.id}`">
+                <strong>{{ authorName(message.authorId) }}</strong>
+                <span>{{ message.text }}</span>
+                <small>{{ message.ts }}</small>
+              </article>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="threadUtilityModal === 'insight'" class="thread-utility-section">
+          <div class="section-label">Insight</div>
+          <ul class="thread-utility-list insight-list">
+            <li v-for="point in threadInsightPoints" :key="point">{{ point }}</li>
+          </ul>
+        </div>
+
+        <div v-else class="thread-utility-section">
+          <div class="section-label">Transcription</div>
+          <div v-if="threadTranscriptionLines.length" class="thread-transcription-card">
+            <p v-for="line in threadTranscriptionLines" :key="line">{{ line }}</p>
+          </div>
+          <p v-else>No transcription is available for this call.</p>
+        </div>
+
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="closeThreadUtilityModal">
+            Done
+          </button>
+          <button v-if="threadUtilityResident" class="primary-action" type="button" @click="openThreadUtilityResident">
+            <UserIcon :size="16" />
+            View Resident
           </button>
         </div>
       </article>
@@ -9178,7 +11959,7 @@ function isSageNav(view: ViewName) {
           <span v-if="scheduleModalResident" class="chip warning">@{{ scheduleModalResident.name }}</span>
           <span class="chip compact">{{ formatDateLabel(scheduleDraft.date) }} · {{ formatTimeInput(scheduleDraft.time) }}</span>
         </div>
-        <div class="modal-form settings-form">
+        <div v-if="scheduleDraft.type !== 'huddle'" class="modal-form settings-form">
           <label>
             Event Category
             <AppSelect
@@ -9215,7 +11996,7 @@ function isSageNav(view: ViewName) {
           </label>
         </div>
 
-        <div class="schedule-search-block">
+        <div v-if="scheduleDraft.type !== 'huddle'" class="schedule-search-block">
           <div class="section-label">Resident</div>
           <label class="search-panel schedule-search-field">
             <Search :size="17" />
@@ -9251,7 +12032,7 @@ function isSageNav(view: ViewName) {
           </div>
         </div>
 
-        <div class="schedule-search-block">
+        <div v-if="scheduleDraft.type !== 'huddle'" class="schedule-search-block">
           <div class="section-label">Assign & Tag Staff</div>
           <label class="search-panel schedule-search-field">
             <Search :size="17" />
@@ -9287,7 +12068,7 @@ function isSageNav(view: ViewName) {
               </span>
               <span>
                 <strong>{{ user.name }}</strong>
-                <small>{{ user.role }} · {{ user.department ?? "Care team" }} · {{ presenceText(user) }}</small>
+                <small>{{ normalizeSystemRole(user.role) }} · {{ user.department ?? "Care team" }} · {{ presenceText(user) }}</small>
               </span>
               <div class="staff-picker-actions">
                 <button
@@ -9313,21 +12094,151 @@ function isSageNav(view: ViewName) {
         </div>
 
         <template v-if="scheduleDraft.type === 'huddle'">
-          <div class="modal-form">
-            <label>
-              Agenda
-              <textarea v-model="scheduleDraft.details" rows="3" />
-            </label>
-          </div>
-          <div class="modal-form settings-form">
-            <label>
-              Call Type
-              <AppSelect
-                v-model="scheduleDraft.callMode"
-                :options="callModeSelectOptions"
-                aria-label="Select call type"
-              />
-            </label>
+          <div class="quick-huddle-layout">
+            <div class="schedule-search-block huddle-resident-card">
+              <div class="section-label">Resident</div>
+              <label class="search-panel schedule-search-field">
+                <Search :size="17" />
+                <input
+                  v-model="scheduleResidentSearchQuery"
+                  type="search"
+                  placeholder="Search resident by name, room, facility, status, or summary"
+                />
+              </label>
+              <div v-if="scheduleModalResident" class="selected-context-row">
+                <img class="avatar" :src="scheduleModalResident.image" :alt="scheduleModalResident.name" />
+                <span>
+                  <strong>{{ scheduleModalResident.name }}</strong>
+                  <small>Room {{ scheduleModalResident.room }} · {{ residentFacility(scheduleModalResident) }}</small>
+                </span>
+                <button class="soft-action compact-action" type="button" @click="scheduleModalResident && openResident(scheduleModalResident)">
+                  <UserIcon :size="15" />
+                  View
+                </button>
+              </div>
+              <div class="schedule-result-list compact-resident-picker">
+                <button
+                  v-for="resident in searchedScheduleResidentOptions.slice(0, 3)"
+                  :key="resident.id"
+                  type="button"
+                  class="schedule-search-result"
+                  @click="selectScheduleResident(resident)"
+                >
+                  <img class="avatar" :src="resident.image" :alt="resident.name" />
+                  <span>
+                    <strong>{{ resident.name }}</strong>
+                    <small>Room {{ resident.room }} · {{ residentFacility(resident) }} · {{ resident.acuity }}</small>
+                  </span>
+                </button>
+              </div>
+              <p class="form-hint">
+                This invite will post to {{ scheduleModalResident ? scheduleModalResident.name : "the resident" }}'s care-team room.
+              </p>
+            </div>
+
+            <div class="modal-form settings-form">
+              <label>
+                Purpose
+                <AppSelect
+                  :model-value="scheduleDraft.eventType"
+                  :options="scheduleEventSelectOptions"
+                  aria-label="Select huddle purpose"
+                  @update:model-value="setScheduleEventType"
+                />
+              </label>
+              <label>
+                Date
+                <input v-model="scheduleDraft.date" type="date" />
+              </label>
+              <label>
+                Time
+                <input v-model="scheduleDraft.time" type="time" />
+              </label>
+              <label>
+                Duration
+                <input v-model="scheduleDraft.duration" type="text" />
+              </label>
+              <label class="form-field-full">
+                Call Type
+                <AppSelect
+                  v-model="scheduleDraft.callMode"
+                  :options="callModeSelectOptions"
+                  aria-label="Select call type"
+                />
+              </label>
+            </div>
+
+            <div class="schedule-search-block">
+              <div class="section-label">Care Team</div>
+              <label class="search-panel schedule-search-field">
+                <Search :size="17" />
+                <input
+                  v-model="scheduleStaffSearchQuery"
+                  type="search"
+                  placeholder="Search staff by name, role, department, facility, or specialization"
+                />
+              </label>
+              <div class="selected-context-row">
+                <span class="staff-avatar" aria-hidden="true">
+                  <UserIcon :size="17" />
+                </span>
+                <span>
+                  <strong>Organizer: {{ userName(scheduleDraft.primaryOwnerId) }}</strong>
+                  <small>
+                    {{ normalizeSystemRole(userRoleLabel(scheduleDraft.primaryOwnerId)) }}
+                    <template v-if="scheduleDraft.taggedUserIds.length">
+                      · Invitees: {{ taggedStaffNames(scheduleDraft.taggedUserIds) }}
+                    </template>
+                  </small>
+                </span>
+              </div>
+              <div class="staff-picker-list compact-staff-picker">
+                <div
+                  v-for="user in searchedScheduleStaffOptions.slice(0, 8)"
+                  :key="user.id"
+                  class="staff-picker-row"
+                  :class="{ selected: scheduleDraft.primaryOwnerId === user.id || scheduleDraft.taggedUserIds.includes(user.id) }"
+                >
+                  <span class="staff-avatar" aria-hidden="true">
+                    <UserIcon :size="17" />
+                  </span>
+                  <span>
+                    <strong>{{ user.name }}</strong>
+                    <small>{{ normalizeSystemRole(user.role) }} · {{ user.department ?? "Care team" }} · {{ presenceText(user) }}</small>
+                  </span>
+                  <div class="staff-picker-actions">
+                    <button
+                      class="soft-action compact-action"
+                      type="button"
+                      :class="{ active: scheduleDraft.primaryOwnerId === user.id }"
+                      @click="setSchedulePrimaryOwner(user.id)"
+                    >
+                      Organizer
+                    </button>
+                    <button
+                      class="soft-action compact-action"
+                      type="button"
+                      :disabled="scheduleDraft.primaryOwnerId === user.id"
+                      :class="{ active: scheduleDraft.taggedUserIds.includes(user.id) }"
+                      @click="toggleScheduleTaggedUser(user.id)"
+                    >
+                      {{ scheduleDraft.taggedUserIds.includes(user.id) ? "Invited" : "Invite" }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="modal-form">
+              <label>
+                Purpose Notes
+                <textarea
+                  v-model="scheduleDraft.details"
+                  rows="3"
+                  placeholder="Example: Align on UA status, hydration plan, and next provider orders."
+                />
+              </label>
+            </div>
           </div>
         </template>
 
@@ -9369,7 +12280,7 @@ function isSageNav(view: ViewName) {
           </div>
         </template>
 
-        <div class="modal-actions">
+        <div class="modal-actions" :class="{ 'huddle-schedule-actions': scheduleDraft.type === 'huddle' }">
           <button
             v-if="scheduleDraft.type === 'huddle'"
             class="soft-action"
@@ -9378,7 +12289,7 @@ function isSageNav(view: ViewName) {
             @click="saveScheduleDraft(false)"
           >
             <Clock :size="16" />
-            Schedule Huddle
+            Send Invite
           </button>
           <button
             class="primary-action"
@@ -9389,7 +12300,7 @@ function isSageNav(view: ViewName) {
             <Video v-if="scheduleDraft.type === 'huddle' && scheduleDraft.callMode === 'video-call'" :size="16" />
             <Phone v-else-if="scheduleDraft.type === 'huddle'" :size="16" />
             <FileText v-else :size="16" />
-            {{ scheduleDraft.type === "huddle" ? "Start Huddle Now" : scheduleDraft.type === "clinical-order" ? "Save Order" : "Save Follow-up" }}
+            {{ scheduleDraft.type === "huddle" ? "Start Now" : scheduleDraft.type === "clinical-order" ? "Save Order" : "Save Follow-up" }}
           </button>
         </div>
       </article>
@@ -9429,7 +12340,7 @@ function isSageNav(view: ViewName) {
             </span>
             <span>
               <strong>{{ user.name }}</strong>
-              <small>{{ user.role }} · {{ presenceText(user) }}</small>
+              <small>{{ normalizeSystemRole(user.role) }} · {{ presenceText(user) }}</small>
             </span>
             <Check v-if="taggedMessageContext.recipientIds.includes(user.id)" :size="16" />
           </button>
@@ -9596,7 +12507,7 @@ function isSageNav(view: ViewName) {
             <input v-model="encounterModalDraft.residentName" type="text" />
           </label>
           <label>
-            Visit Type
+            Encounter Type
             <AppSelect
               v-model="encounterModalDraft.visitType"
               :options="visitTypeSelectOptions"
