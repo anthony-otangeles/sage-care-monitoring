@@ -4,6 +4,20 @@ export type AcuityLevel = "WATCHFUL" | "MONITORING" | "STABLE";
 
 export type CareStep = "done" | "active" | "pending";
 
+export type CodeStatus =
+  | "Full Code"
+  | "DNR (Do Not Resuscitate)"
+  | "DNI (Do Not Intubate)"
+  | "DNR / DNI"
+  | "Limited Interventions"
+  | "Selective Treatment"
+  | "Comfort Measures Only (CMO)"
+  | "DNR - Comfort Care Arrest (DNR-CCA)"
+  | "DNR - Comfort Care Only (DNR-CC)"
+  | "Allow Natural Death (AND)"
+  | "Hospice / Palliative Focus"
+  | "Unknown / Pending Documentation";
+
 export interface Resident {
   id: string;
   name: string;
@@ -13,7 +27,7 @@ export interface Resident {
   acuity: AcuityLevel;
   statusChips: string[];
   image: string;
-  codeStatus: "Full Code" | "DNR" | "DNR/DNI" | "Comfort Care";
+  codeStatus: CodeStatus;
   latest: string;
   careSteps: { surveillance: CareStep; reassessment: CareStep; provider: CareStep };
 
@@ -65,7 +79,7 @@ export const residents: Resident[] = [
     acuity: "WATCHFUL",
     statusChips: ["DECLINING"],
     image: residentImage(1),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Confusion ↑ overnight, possible UTI",
     careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
     situation: {
@@ -155,7 +169,7 @@ export const residents: Resident[] = [
     acuity: "MONITORING",
     statusChips: [],
     image: residentImage(3),
-    codeStatus: "DNR/DNI",
+    codeStatus: "DNR / DNI",
     latest: "Finished antibiotics, lungs clear",
     careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
     situation: {
@@ -272,7 +286,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(6),
-    codeStatus: "Comfort Care",
+    codeStatus: "Comfort Measures Only (CMO)",
     latest: "Quiet night, eating well",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
@@ -308,7 +322,7 @@ export const residents: Resident[] = [
     acuity: "WATCHFUL",
     statusChips: ["DECLINING"],
     image: residentImage(7),
-    codeStatus: "DNR/DNI",
+    codeStatus: "DNR / DNI",
     latest: "New onset chest tightness post-meal",
     careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
     situation: {
@@ -389,7 +403,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(9),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Cheerful, joined morning singalong",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
@@ -465,7 +479,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(11),
-    codeStatus: "Comfort Care",
+    codeStatus: "Comfort Measures Only (CMO)",
     latest: "Comfortable, family visiting today",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
@@ -541,7 +555,7 @@ export const residents: Resident[] = [
     acuity: "MONITORING",
     statusChips: [],
     image: residentImage(13),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Mild dehydration, encouraging fluids",
     careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
     situation: {
@@ -607,7 +621,7 @@ export const residents: Resident[] = [
     acuity: "MONITORING",
     statusChips: [],
     image: residentImage(15),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Pressure injury healing, repositioning q2h",
     careSteps: { surveillance: "active", reassessment: "pending", provider: "done" },
     situation: {
@@ -639,7 +653,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(16),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "COPD stable on home O2",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
@@ -673,7 +687,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(17),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Cheerful, attended bingo",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
@@ -735,7 +749,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(19),
-    codeStatus: "Comfort Care",
+    codeStatus: "Comfort Measures Only (CMO)",
     latest: "Comfortable, no acute concerns",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
@@ -807,7 +821,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(21),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Stable, enjoying garden visits",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
@@ -871,7 +885,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(23),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Stable post-pneumonia recovery",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
@@ -904,7 +918,7 @@ export const residents: Resident[] = [
     acuity: "MONITORING",
     statusChips: [],
     image: residentImage(24),
-    codeStatus: "DNR/DNI",
+    codeStatus: "DNR / DNI",
     latest: "Parkinson's, increased rigidity AM",
     careSteps: { surveillance: "active", reassessment: "pending", provider: "pending" },
     situation: {
@@ -937,7 +951,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(25),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Stable, ate full breakfast",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
@@ -968,7 +982,7 @@ export const residents: Resident[] = [
     acuity: "WATCHFUL",
     statusChips: ["DECLINING"],
     image: residentImage(26),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Anorexia, declining intake third day",
     careSteps: { surveillance: "active", reassessment: "active", provider: "pending" },
     situation: {
@@ -1006,7 +1020,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(27),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Stable, knitting in common room",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {
@@ -1072,7 +1086,7 @@ export const residents: Resident[] = [
     acuity: "STABLE",
     statusChips: [],
     image: residentImage(29),
-    codeStatus: "DNR",
+    codeStatus: "DNR (Do Not Resuscitate)",
     latest: "Stable, scheduled hair appointment today",
     careSteps: { surveillance: "done", reassessment: "done", provider: "done" },
     situation: {

@@ -22,8 +22,9 @@ export interface ThreadMessage {
   authorId: string;
   text: string;
   ts: string;
-  kind?: "text" | "voice-call" | "video-call";
+  kind?: "text" | "voice-message" | "voice-call" | "video-call";
   duration?: string;
+  durationSeconds?: number;
 }
 
 export type ThreadPurpose =

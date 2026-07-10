@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, type Component } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch, type Component } from "vue";
 import {
   Activity,
   AlertCircle,
@@ -56,6 +56,8 @@ import {
 
 import colors from "../constants/colors";
 import AppSelect from "./components/AppSelect.vue";
+import VoiceMessageBubble from "./components/VoiceMessageBubble.vue";
+import VoiceRecordingControls from "./components/VoiceRecordingControls.vue";
 import {
   buildResidentIntelligence,
   mockNotesPlusEvents,
@@ -110,7 +112,8 @@ type ProviderEncounterStatus =
   | "scribe-in-progress"
   | "needs-review"
   | "revision"
-  | "submitted-to-billing";
+  | "submitted-to-billing"
+  | "cancelled";
 type ProviderVisitSyncStatus = "pending" | "synced";
 type EncounterSectionKind = "paragraphs" | "bullets" | "grid";
 type RevisionThreadStatus = "open" | "addressed";
@@ -120,6 +123,15 @@ type ScheduleView = "list" | "calendar";
 type ScheduleDraftType = "huddle" | "follow-up" | "clinical-order";
 type ScheduleStaffRole = RoleKey | "staff";
 type MessageStartMode = "message" | "voice-call" | "video-call";
+type CancellationReason =
+  | "Duplicate encounter / encounter exists"
+  | "Entered in error"
+  | "Testing / training encounter"
+  | "Patient not seen"
+  | "Administrative cancellation"
+  | "Other";
+type VoiceComposerTarget = "resident-chat" | "sage" | `thread:${string}`;
+type VoiceComposerPhase = "recording" | "preview";
 type ThreadUtilityMode = "summary" | "insight" | "transcription";
 type ActionTargetRole = "provider" | "cna";
 type ActionPriority = "Stat" | "High" | "Routine";
@@ -330,6 +342,16 @@ interface EncounterSignatureSnapshot extends ProviderSignature {
   signedAt: string;
 }
 
+interface EncounterCancellation {
+  reason: CancellationReason;
+  details?: string;
+  cancelledAt: string;
+  cancelledById: string;
+  cancelledByName: string;
+  previousStatus: Exclude<ProviderEncounterStatus, "cancelled">;
+  signatureRevoked: boolean;
+}
+
 interface ProviderVisit {
   id: string;
   residentId: string;
@@ -356,6 +378,21 @@ interface ProviderVisit {
   documentTitle: string;
   sections: EncounterSection[];
   signedSignature?: EncounterSignatureSnapshot;
+  cancellation?: EncounterCancellation;
+}
+
+interface VoiceComposerState {
+  target: VoiceComposerTarget;
+  phase: VoiceComposerPhase;
+  seconds: number;
+}
+
+interface ResidentChatMessage {
+  id: string;
+  sender: "sage" | "user";
+  text: string;
+  kind?: "text" | "voice-message";
+  durationSeconds?: number;
 }
 
 interface EncounterModalDraft {
@@ -632,6 +669,12 @@ type AiMessage =
   | { id: string; kind: "briefing" }
   | {
       id: string;
+      kind: "voice-message";
+      from: "me";
+      durationSeconds: number;
+    }
+  | {
+      id: string;
       kind: "text";
       from: "me" | "sage";
       text: string;
@@ -793,6 +836,15 @@ const visitTypes: VisitType[] = [
   "Transitional Care Management",
   "Transitional Care Management - Telemed",
   "Wound Care",
+];
+
+const cancellationReasons: CancellationReason[] = [
+  "Duplicate encounter / encounter exists",
+  "Entered in error",
+  "Testing / training encounter",
+  "Patient not seen",
+  "Administrative cancellation",
+  "Other",
 ];
 
 const clinicalOrderTypes: ClinicalOrderType[] = [
@@ -1079,6 +1131,62 @@ const initialProviderNotes: ProviderNote[] = [
   },
 ];
 
+const reviewCodeStatusOptions: EncounterContentItem[] = [
+  {
+    label: "Full Code",
+    text: "All life-sustaining measures are permitted, including CPR, intubation, defibrillation, and advanced life support.",
+  },
+  {
+    label: "DNI (Do Not Intubate)",
+    text: "Endotracheal intubation and mechanical ventilation are not permitted; other treatments may be provided.",
+  },
+  {
+    label: "Limited Interventions",
+    text: "Selected medical treatments are allowed, but no CPR, intubation, or intensive life-sustaining measures.",
+  },
+  {
+    label: "Comfort Measures Only (CMO)",
+    text: "Care is focused exclusively on comfort and symptom relief; no life-prolonging treatments are provided.",
+  },
+  {
+    label: "DNR - Comfort Care Only (DNR-CC)",
+    text: "Only comfort-focused care is provided at all times; no resuscitative or life-prolonging interventions are used.",
+  },
+  {
+    label: "Hospice / Palliative Focus",
+    text: "Care emphasizes symptom control and quality of life, typically aligned with DNR and comfort-focused goals.",
+  },
+  {
+    label: "DNR (Do Not Resuscitate)",
+    text: "No CPR is performed if the resident experiences cardiac or respiratory arrest.",
+  },
+  {
+    label: "DNR / DNI",
+    text: "Neither CPR nor intubation is performed in the event of cardiac or respiratory arrest.",
+  },
+  {
+    label: "Selective Treatment",
+    text: "Hospital transfer and medical treatment are permitted; ICU-level care and aggressive life support are avoided.",
+  },
+  {
+    label: "DNR - Comfort Care Arrest (DNR-CCA)",
+    text: "Full medical treatment is provided until cardiac or respiratory arrest occurs; no CPR is performed after arrest.",
+  },
+  {
+    label: "Allow Natural Death (AND)",
+    text: "Natural death is allowed without resuscitative efforts; clinically equivalent to DNR using patient-centered language.",
+  },
+  {
+    label: "Unknown / Pending Documentation",
+    text: "Code status has not yet been confirmed or documented and requires prompt clarification.",
+  },
+];
+
+function codeStatusDetails(codeStatus: Resident["codeStatus"]) {
+  return reviewCodeStatusOptions.find((item) => item.label === codeStatus)
+    ?? reviewCodeStatusOptions[reviewCodeStatusOptions.length - 1];
+}
+
 // TODO(NOTES_PLUS): Replace this reference-aligned mock document with the structured encounter sections received from Otangeles Notes+.
 function encounterSectionsForResident(resident: Resident): EncounterSection[] {
   const primaryConcern = resident.situation.concerns[0]?.title ?? resident.latest;
@@ -1099,15 +1207,7 @@ function encounterSectionsForResident(resident: Resident): EncounterSection[] {
       id: "code-status",
       title: "Code Status",
       kind: "bullets",
-      content: [
-        { text: resident.codeStatus },
-        {
-          text:
-            resident.codeStatus === "Full Code"
-              ? "All life-sustaining measures are permitted, including CPR, intubation, defibrillation, and advanced life support."
-              : `Current documented directive: ${resident.codeStatus}. Follow facility policy and the resident's active advance-directive record.`,
-        },
-      ],
+      content: [{ ...codeStatusDetails(resident.codeStatus) }],
       verified: false,
       revisionThreads: [],
     },
@@ -1352,6 +1452,12 @@ function splitEncounterDetail(text: string) {
     .filter(Boolean);
 }
 
+function familyHistoryField(text: string, field: string) {
+  const prefix = `${field.toLowerCase()}:`;
+  const detail = splitEncounterDetail(text).find((item) => item.toLowerCase().startsWith(prefix));
+  return detail?.slice(detail.indexOf(":") + 1).trim() || "Unknown";
+}
+
 function mockEncounterPriority(resident: Resident): ProviderVisit["clinicalPriority"] {
   if (
     resident.statusChips.includes("DECLINING") ||
@@ -1422,7 +1528,7 @@ function seededEncounter(
     status,
     notesPlusSyncStatus: status === "scheduled" || status === "provider-in-progress" ? "pending" : "synced",
     notesPlusSyncedAt: status === "scheduled" || status === "provider-in-progress" ? undefined : scheduledTime,
-    assignedScribe: status === "scheduled" || status === "provider-in-progress" ? undefined : "Mark Rivera, Scribe",
+    assignedScribe: status === "scheduled" || status === "provider-in-progress" ? undefined : "Mark Rivera",
     documentTitle: "Progress Notes",
     sections: encounterSectionsForResident(resident),
   };
@@ -1822,7 +1928,7 @@ const residentTab = ref<ResidentTab>("situation");
 const residentContextTab = ref<ResidentContextTab>("updates");
 const openSituationAccordion = ref<SituationAccordionKey>("facility-focus");
 const openProviderHomeAccordion = ref<ProviderHomeAccordionKey>("review-decide");
-const residentChat = ref<Resident["talk"]>([]);
+const residentChat = ref<ResidentChatMessage[]>([]);
 const residentDraft = ref("");
 const openClarify = ref<number | null>(null);
 const showDelegate = ref(false);
@@ -1835,6 +1941,14 @@ const selectedThreadId = ref<string | null>(null);
 const createdThreads = ref<Thread[]>([]);
 const threadMessages = ref<ThreadMessage[]>([]);
 const threadDraft = ref("");
+const threadDraftInput = ref<HTMLInputElement | null>(null);
+const threadMentionOpen = ref(false);
+const threadMentionQuery = ref("");
+const threadMentionStart = ref(-1);
+const threadMentionCursor = ref(-1);
+const threadMentionActiveIndex = ref(0);
+const messageVoiceState = ref<VoiceComposerState | null>(null);
+const playingVoiceMessageId = ref<string | null>(null);
 const threadMenuOpen = ref(false);
 const threadRenameModalOpen = ref(false);
 const threadRenameDraft = ref("");
@@ -1928,6 +2042,11 @@ const revisionModalText = ref("");
 const revisionReplyDrafts = ref<Record<string, string>>({});
 const signatureSetupPromptOpen = ref(false);
 const signEncounterConfirmOpen = ref(false);
+const revokeSignatureVisitId = ref<string | null>(null);
+const cancelVisitId = ref<string | null>(null);
+const cancelVisitReason = ref<CancellationReason>("Duplicate encounter / encounter exists");
+const cancelVisitDetails = ref("");
+const encounterCancellationFeedback = ref("");
 const signatureMode = ref<SignatureMethod>("draw");
 const signatureTypedName = ref("");
 const signatureUploadPreview = ref("");
@@ -1955,6 +2074,8 @@ let providerRecordingTimer: number | null = null;
 let cnaRecordingTimer: number | null = null;
 let visitRecordingTimer: number | null = null;
 let visitElapsedTimer: number | null = null;
+let messageVoiceTimer: number | null = null;
+let voicePlaybackTimer: number | null = null;
 
 const profileStates = ref<Record<RoleKey, ProfileState>>({
   don: { ...initialProfileStates.don, assignedFacilities: [...initialProfileStates.don.assignedFacilities] },
@@ -2023,7 +2144,9 @@ watch(
 
 function fetchDailyEncountersFromNotesPlus() {
   // TODO(NOTES_PLUS): Replace the local encounter fixtures with the provider's Daily Visit List API response.
-  return providerVisitsState.value.filter((encounter) => encounter.scheduledDate === todayDateKey());
+  return providerVisitsState.value.filter(
+    (encounter) => encounter.scheduledDate === todayDateKey() && encounter.status !== "cancelled",
+  );
 }
 
 function syncEndedEncounterToNotesPlus(encounter: ProviderVisit) {
@@ -2045,6 +2168,11 @@ function returnEncounterRevisionToNotesPlus(encounter: ProviderVisit) {
 function submitSignedEncounterToNotesPlus(encounter: ProviderVisit) {
   // TODO(NOTES_PLUS): Send the signed document snapshot and update the remote Encounter to Submitted to Billing.
   receiveEncounterStatusFromNotesPlus(encounter, "submitted-to-billing");
+}
+
+function revokeSignedEncounterFromNotesPlus(encounter: ProviderVisit) {
+  // TODO(NOTES_PLUS): Revoke the remote signature and notify billing that this encounter returned to review.
+  receiveEncounterStatusFromNotesPlus(encounter, "needs-review");
 }
 
 function scheduledVisitTypeForOpportunityCategory(category: string): VisitType {
@@ -2236,6 +2364,23 @@ const filteredResidents = computed(() =>
 const searchedResidents = computed(() =>
   filteredResidents.value.filter((resident) => residentMatchesSearch(resident, residentSearchQuery.value)),
 );
+const threadMentionSuggestions = computed(() => {
+  if (!threadMentionOpen.value) {
+    return [];
+  }
+  const query = threadMentionQuery.value.trim().toLowerCase();
+  return filteredResidents.value
+    .filter((resident) =>
+      residentVisibleForRole(selectedRole.value, resident.id, residentFacility(resident)),
+    )
+    .filter((resident) => {
+      if (!query) {
+        return true;
+      }
+      return `${resident.name} ${resident.room}`.toLowerCase().includes(query);
+    })
+    .slice(0, 6);
+});
 const filteredPriorityResidents = computed(() =>
   priorityResidents.filter(
     (resident) => selectedFacility.value === "all" || residentFacility(resident) === selectedFacility.value,
@@ -2349,6 +2494,19 @@ const activeReviewAllVerified = computed(() =>
   Boolean(activeReviewEncounter.value?.sections.length) &&
   activeReviewEncounter.value!.sections.every((section) => section.verified),
 );
+const revokeSignatureEncounter = computed(() =>
+  revokeSignatureVisitId.value
+    ? providerVisitsState.value.find((visit) => visit.id === revokeSignatureVisitId.value) ?? null
+    : null,
+);
+const cancelVisitEncounter = computed(() =>
+  cancelVisitId.value
+    ? providerVisitsState.value.find((visit) => visit.id === cancelVisitId.value && visit.status !== "cancelled") ?? null
+    : null,
+);
+const canConfirmCancelVisit = computed(
+  () => cancelVisitReason.value !== "Other" || Boolean(cancelVisitDetails.value.trim()),
+);
 const currentProviderSignature = computed(() => providerSignatures.value[activeStaffUser.value.id] ?? null);
 function encounterHasClinicalVisitMerit(encounter: ProviderVisit) {
   return providerOpportunities.value.some(
@@ -2412,7 +2570,7 @@ const visitElapsedLabel = computed(() => {
 const selectedResidentVisits = computed(() =>
   selectedResident.value
     ? providerVisitsState.value
-        .filter((visit) => visit.residentId === selectedResident.value?.id)
+        .filter((visit) => visit.residentId === selectedResident.value?.id && visit.status !== "cancelled")
         .slice()
         .sort((a, b) => b.startedAtMs - a.startedAtMs)
     : [],
@@ -2892,7 +3050,7 @@ const headerNotifications = computed<HeaderNotification[]>(() => {
               id,
               tone: "warning",
               title: `${encounter.residentName} is ready for review`,
-              detail: `${encounter.visitType} encounter completed by ${encounter.assignedScribe ?? "the assigned scribe"}.`,
+              detail: `${encounter.visitType} encounter completed by ${scribeDisplayName(encounter.assignedScribe)}.`,
               meta: "Needs Review",
               icon: FileText,
               target: {
@@ -3395,6 +3553,7 @@ const roleFacilitySelectOptions = computed<SelectOption[]>(() =>
 const visitTypeSelectOptions = computed<SelectOption[]>(() =>
   visitTypes.map((visitType) => selectOption(visitType)),
 );
+const cancellationReasonOptions: SelectOption[] = cancellationReasons.map((reason) => selectOption(reason));
 const appearanceSelectOptions: SelectOption[] = ["System", "Light", "Dark"].map((value) => selectOption(value));
 const languageSelectOptions: SelectOption[] = ["English (US)", "Spanish"].map((value) => selectOption(value));
 const prioritySelectOptions: SelectOption[] = ["Stat", "High", "Routine"].map((value) => selectOption(value));
@@ -4391,7 +4550,7 @@ function timelineEventsForResident(resident: Resident) {
   });
 
   providerVisitsState.value.forEach((visit, index) => {
-    if (visit.residentId !== resident.id) {
+    if (visit.residentId !== resident.id || visit.status === "cancelled") {
       return;
     }
     const summary = visit.textNote.trim() || visit.voiceTranscript.trim();
@@ -4690,21 +4849,28 @@ function formatDateLabel(dateKey: string) {
 }
 
 function formatDocumentDate(dateKey: string) {
-  return dateFromKey(dateKey).toLocaleDateString([], {
-    month: "2-digit",
-    day: "2-digit",
-    year: "numeric",
-  });
+  const [year, month, day] = dateKey.split("-");
+  if (!year || !month || !day) {
+    return dateKey;
+  }
+  return `${month.padStart(2, "0")}-${day.padStart(2, "0")}-${year}`;
 }
 
 function mockResidentDateOfBirth(resident: Resident) {
   // TODO(NOTES_PLUS): Replace this derived mock DOB with the resident demographic value received with the encounter.
   const birthYear = new Date().getFullYear() - resident.age;
-  return new Date(birthYear, 0, 15).toLocaleDateString([], {
-    month: "2-digit",
-    day: "2-digit",
-    year: "numeric",
-  });
+  return `01-15-${birthYear}`;
+}
+
+function formatDocumentResidentName(resident: Resident) {
+  const nameParts = resident.name.trim().split(/\s+/);
+  const lastName = nameParts.pop() ?? resident.name;
+  const firstName = nameParts.join(" ");
+  return `${lastName}, ${firstName || lastName} (${resident.sex})`.toUpperCase();
+}
+
+function scribeDisplayName(name?: string) {
+  return (name ?? "Mark Rivera").replace(/,\s*Scribe$/i, "");
 }
 
 function formatTimeInput(time: string) {
@@ -5849,6 +6015,10 @@ function handleNotificationSelection(notification: HeaderNotification) {
 }
 
 function setView(view: ViewName) {
+  cancelMessageVoiceRecording();
+  stopVoicePlayback();
+  closeThreadMention();
+  closeCancelVisit();
   closeFloatingMenus();
   escalationModalResidentId.value = null;
   scheduleModalOpen.value = false;
@@ -5878,6 +6048,10 @@ function setView(view: ViewName) {
 }
 
 function selectRole(role: RoleKey) {
+  cancelMessageVoiceRecording();
+  stopVoicePlayback();
+  closeThreadMention();
+  closeCancelVisit();
   closeFloatingMenus();
   escalationModalResidentId.value = null;
   scheduleModalOpen.value = false;
@@ -5904,6 +6078,10 @@ function selectRole(role: RoleKey) {
 }
 
 function login() {
+  cancelMessageVoiceRecording();
+  stopVoicePlayback();
+  closeThreadMention();
+  closeCancelVisit();
   closeFloatingMenus();
   ensureLoginUserForRole(selectedRole.value);
   syncProfileFromLoginUser(selectedRole.value);
@@ -5922,6 +6100,8 @@ function login() {
 }
 
 function openResident(residentOrId: Resident | string) {
+  cancelMessageVoiceRecording();
+  stopVoicePlayback();
   closeFloatingMenus();
   const resident =
     typeof residentOrId === "string"
@@ -5942,6 +6122,7 @@ function openResident(residentOrId: Resident | string) {
   deleteProviderNoteId.value = null;
   providerTranscript.value = "";
   providerNoteDraft.value = "";
+  encounterCancellationFeedback.value = "";
   assignedNurse.value = null;
   openClarify.value = resident.situation.clarify.length ? 0 : null;
   window.requestAnimationFrame(() => {
@@ -5950,6 +6131,8 @@ function openResident(residentOrId: Resident | string) {
 }
 
 function closeResident() {
+  cancelMessageVoiceRecording();
+  stopVoicePlayback();
   residentActionMenuOpen.value = false;
   if (activeView.value === "provider-visit") {
     stopVisitRecording();
@@ -6001,7 +6184,258 @@ function sendResidentChat() {
   }, 400);
 }
 
+function closeThreadMention() {
+  threadMentionOpen.value = false;
+  threadMentionQuery.value = "";
+  threadMentionStart.value = -1;
+  threadMentionCursor.value = -1;
+  threadMentionActiveIndex.value = 0;
+}
+
+function updateThreadMention(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const cursor = input.selectionStart ?? input.value.length;
+  const beforeCursor = input.value.slice(0, cursor);
+  const mentionStart = beforeCursor.lastIndexOf("@");
+  threadDraft.value = input.value;
+
+  if (
+    mentionStart < 0
+    || (mentionStart > 0 && !/\s/.test(beforeCursor[mentionStart - 1]))
+    || beforeCursor.slice(mentionStart + 1).includes("@")
+    || beforeCursor.slice(mentionStart + 1).includes("\n")
+  ) {
+    closeThreadMention();
+    return;
+  }
+
+  const query = beforeCursor.slice(mentionStart + 1);
+  if (query.length > 60) {
+    closeThreadMention();
+    return;
+  }
+  const completedResidentTag = filteredResidents.value.some((resident) => {
+    const residentName = resident.name.toLowerCase();
+    const normalizedQuery = query.toLowerCase();
+    const suffix = normalizedQuery.slice(residentName.length);
+    return normalizedQuery.startsWith(residentName) && Boolean(suffix) && /^[\s.,;:!?]/.test(suffix);
+  });
+  if (completedResidentTag) {
+    closeThreadMention();
+    return;
+  }
+
+  threadMentionOpen.value = true;
+  threadMentionQuery.value = query;
+  threadMentionStart.value = mentionStart;
+  threadMentionCursor.value = cursor;
+  threadMentionActiveIndex.value = 0;
+}
+
+function selectThreadMention(resident: Resident) {
+  const start = threadMentionStart.value;
+  const cursor = threadMentionCursor.value;
+  if (start < 0 || cursor < start) {
+    closeThreadMention();
+    return;
+  }
+
+  const mention = `${residentTag(resident)} `;
+  threadDraft.value = `${threadDraft.value.slice(0, start)}${mention}${threadDraft.value.slice(cursor)}`;
+  const nextCursor = start + mention.length;
+  closeThreadMention();
+  nextTick(() => {
+    threadDraftInput.value?.focus();
+    threadDraftInput.value?.setSelectionRange(nextCursor, nextCursor);
+  });
+}
+
+function moveThreadMentionSelection(event: KeyboardEvent, direction: number) {
+  const suggestions = threadMentionSuggestions.value;
+  if (!threadMentionOpen.value || !suggestions.length) {
+    return;
+  }
+  event.preventDefault();
+  threadMentionActiveIndex.value =
+    (threadMentionActiveIndex.value + direction + suggestions.length) % suggestions.length;
+}
+
+function selectActiveThreadMention(event: KeyboardEvent) {
+  const resident = threadMentionSuggestions.value[threadMentionActiveIndex.value];
+  if (!threadMentionOpen.value || !resident) {
+    return;
+  }
+  event.preventDefault();
+  selectThreadMention(resident);
+}
+
+function closeThreadMentionFromKeyboard(event: KeyboardEvent) {
+  if (!threadMentionOpen.value) {
+    return;
+  }
+  event.preventDefault();
+  closeThreadMention();
+}
+
+function deferCloseThreadMention() {
+  window.setTimeout(closeThreadMention, 100);
+}
+
+function threadVoiceTarget(threadId: string): VoiceComposerTarget {
+  return `thread:${threadId}`;
+}
+
+function isVoiceTargetActive(target: VoiceComposerTarget) {
+  return messageVoiceState.value?.target === target;
+}
+
+function voiceComposerPhase(target: VoiceComposerTarget): VoiceComposerPhase {
+  return messageVoiceState.value?.target === target ? messageVoiceState.value.phase : "recording";
+}
+
+function voiceComposerSeconds(target: VoiceComposerTarget) {
+  return messageVoiceState.value?.target === target ? messageVoiceState.value.seconds : 0;
+}
+
+function voicePreviewId(target: VoiceComposerTarget) {
+  return `voice-preview:${target}`;
+}
+
+function isVoiceMessagePlaying(messageId: string) {
+  return playingVoiceMessageId.value === messageId;
+}
+
+function clearMessageVoiceTimer() {
+  if (messageVoiceTimer !== null) {
+    window.clearInterval(messageVoiceTimer);
+    messageVoiceTimer = null;
+  }
+}
+
+function clearVoicePlaybackTimer() {
+  if (voicePlaybackTimer !== null) {
+    window.clearTimeout(voicePlaybackTimer);
+    voicePlaybackTimer = null;
+  }
+}
+
+function stopVoicePlayback() {
+  clearVoicePlaybackTimer();
+  playingVoiceMessageId.value = null;
+}
+
+function cancelMessageVoiceRecording() {
+  clearMessageVoiceTimer();
+  const target = messageVoiceState.value?.target;
+  if (target && playingVoiceMessageId.value === voicePreviewId(target)) {
+    stopVoicePlayback();
+  }
+  messageVoiceState.value = null;
+}
+
+function startMessageVoiceRecording(target: VoiceComposerTarget) {
+  if (target.startsWith("thread:")) {
+    closeThreadMention();
+  }
+  cancelMessageVoiceRecording();
+  stopVoicePlayback();
+  messageVoiceState.value = { target, phase: "recording", seconds: 0 };
+  messageVoiceTimer = window.setInterval(() => {
+    if (messageVoiceState.value?.target === target && messageVoiceState.value.phase === "recording") {
+      messageVoiceState.value.seconds += 1;
+    }
+  }, 1000);
+}
+
+function stopMessageVoiceRecording(target: VoiceComposerTarget) {
+  if (messageVoiceState.value?.target !== target || messageVoiceState.value.phase !== "recording") {
+    return;
+  }
+  clearMessageVoiceTimer();
+  messageVoiceState.value.seconds = Math.max(messageVoiceState.value.seconds, 1);
+  messageVoiceState.value.phase = "preview";
+}
+
+function restartMessageVoiceRecording(target: VoiceComposerTarget) {
+  startMessageVoiceRecording(target);
+}
+
+function toggleVoicePlayback(messageId: string, durationSeconds: number) {
+  if (playingVoiceMessageId.value === messageId) {
+    stopVoicePlayback();
+    return;
+  }
+  stopVoicePlayback();
+  playingVoiceMessageId.value = messageId;
+  voicePlaybackTimer = window.setTimeout(() => {
+    if (playingVoiceMessageId.value === messageId) {
+      playingVoiceMessageId.value = null;
+    }
+    voicePlaybackTimer = null;
+  }, Math.max(durationSeconds, 1) * 1000);
+}
+
+function formatVoiceDuration(seconds: number) {
+  const safeSeconds = Math.max(1, Math.floor(seconds));
+  return `${String(Math.floor(safeSeconds / 60)).padStart(2, "0")}:${String(safeSeconds % 60).padStart(2, "0")}`;
+}
+
+function sendMessageVoiceRecording(target: VoiceComposerTarget) {
+  const recording = messageVoiceState.value;
+  if (!recording || recording.target !== target || recording.phase !== "preview") {
+    return;
+  }
+  const durationSeconds = Math.max(recording.seconds, 1);
+  const timestamp = Date.now();
+
+  if (target === "resident-chat") {
+    residentChat.value.push({
+      id: `resident-voice-${timestamp}`,
+      sender: "user",
+      text: "Voice message",
+      kind: "voice-message",
+      durationSeconds,
+    });
+    residentChat.value.push({
+      id: `resident-voice-ack-${timestamp}`,
+      sender: "sage",
+      text: "Voice message received. This prototype simulates playback and does not create a transcription.",
+    });
+  } else if (target === "sage") {
+    aiMessages.value.push({
+      id: `sage-voice-${timestamp}`,
+      kind: "voice-message",
+      from: "me",
+      durationSeconds,
+    });
+    aiMessages.value.push({
+      id: `sage-voice-ack-${timestamp}`,
+      kind: "text",
+      from: "sage",
+      text: "Voice message received. This prototype simulates playback and does not create a transcription.",
+    });
+  } else {
+    const threadId = target.slice("thread:".length);
+    if (threadId) {
+      appendThreadMessage(threadId, {
+        id: `thread-voice-${timestamp}`,
+        authorId: activeStaffUser.value.id,
+        text: "Voice message",
+        ts: "now",
+        kind: "voice-message",
+        durationSeconds,
+        duration: formatVoiceDuration(durationSeconds),
+      });
+    }
+  }
+
+  cancelMessageVoiceRecording();
+}
+
 function openThread(thread: Thread) {
+  cancelMessageVoiceRecording();
+  stopVoicePlayback();
+  closeThreadMention();
   if (thread.unread > 0 || !visibleThreads.value.some((entry) => entry.id === thread.id)) {
     createLocalThread({ ...thread, unread: 0 });
   }
@@ -6128,6 +6562,9 @@ function saveThreadRename() {
 }
 
 function closeThread() {
+  cancelMessageVoiceRecording();
+  stopVoicePlayback();
+  closeThreadMention();
   selectedThreadId.value = null;
   threadMessages.value = [];
   threadDraft.value = "";
@@ -6150,6 +6587,7 @@ function sendThreadMessage() {
     ts: "now",
   });
   threadDraft.value = "";
+  closeThreadMention();
 }
 
 function toggleUserSelection(userId: string) {
@@ -6375,6 +6813,7 @@ function providerVisitStatusLabel(visit: ProviderVisit) {
     "needs-review": "Needs Review",
     revision: "Revision",
     "submitted-to-billing": "Submitted to Billing",
+    cancelled: "Cancelled",
   };
   return labels[visit.status];
 }
@@ -6557,7 +6996,7 @@ function confirmStopVisit() {
   clearVisitElapsedTimer();
   visit.status = "scribe-in-progress";
   visit.endedAt = currentTimeLabel();
-  visit.assignedScribe = "Mark Rivera, Scribe";
+  visit.assignedScribe = "Mark Rivera";
   syncProviderNoteIntoEncounterDocument(visit);
   const assessmentPlanSection = visit.sections.find((section) => section.id === "assessment-plan");
   if (assessmentPlanSection && visit.orderIds.length) {
@@ -6726,7 +7165,7 @@ function simulateScribeResubmission(encounter: ProviderVisit) {
       thread.comments.push({
         id: `scribe-reply-${thread.id}-${Date.now()}`,
         authorId: "mock-scribe",
-        authorName: encounter.assignedScribe ?? "Mark Rivera, Scribe",
+        authorName: scribeDisplayName(encounter.assignedScribe),
         role: "scribe",
         body: "The requested correction has been applied to this section and is ready for provider review.",
         createdAt: currentTimeLabel(),
@@ -6778,6 +7217,106 @@ function confirmEncounterSignature() {
   submitSignedEncounterToNotesPlus(encounter);
   signEncounterConfirmOpen.value = false;
   returnToResidentEncounters();
+}
+
+function requestRevokeEncounterSignature(encounter: ProviderVisit) {
+  if (
+    encounter.status !== "submitted-to-billing"
+    || !encounter.signedSignature
+    || encounter.signedSignature.providerId !== activeStaffUser.value.id
+  ) {
+    return;
+  }
+  revokeSignatureVisitId.value = encounter.id;
+}
+
+function closeRevokeEncounterSignature() {
+  revokeSignatureVisitId.value = null;
+}
+
+function confirmRevokeEncounterSignature() {
+  const encounter = revokeSignatureEncounter.value;
+  if (
+    !encounter?.signedSignature
+    || encounter.signedSignature.providerId !== activeStaffUser.value.id
+  ) {
+    closeRevokeEncounterSignature();
+    return;
+  }
+
+  encounter.signedSignature = undefined;
+  encounter.sections.forEach((section) => {
+    section.verified = false;
+  });
+  encounter.notesPlusSyncStatus = "synced";
+  encounter.notesPlusSyncedAt = currentTimeLabel();
+  revokeSignedEncounterFromNotesPlus(encounter);
+  closeRevokeEncounterSignature();
+}
+
+function openCancelVisit(encounter: ProviderVisit) {
+  if (encounter.status === "cancelled") {
+    return;
+  }
+  closeRevokeEncounterSignature();
+  cancelVisitId.value = encounter.id;
+  cancelVisitReason.value = "Duplicate encounter / encounter exists";
+  cancelVisitDetails.value = "";
+}
+
+function closeCancelVisit() {
+  cancelVisitId.value = null;
+  cancelVisitReason.value = "Duplicate encounter / encounter exists";
+  cancelVisitDetails.value = "";
+}
+
+function confirmCancelVisit() {
+  const encounter = cancelVisitEncounter.value;
+  if (!encounter || !canConfirmCancelVisit.value) {
+    return;
+  }
+
+  const previousStatus = encounter.status as Exclude<ProviderEncounterStatus, "cancelled">;
+  const signatureRevoked = Boolean(encounter.signedSignature);
+  if (signatureRevoked) {
+    encounter.signedSignature = undefined;
+    encounter.sections.forEach((section) => {
+      section.verified = false;
+    });
+  }
+
+  encounter.cancellation = {
+    reason: cancelVisitReason.value,
+    details: cancelVisitReason.value === "Other" ? cancelVisitDetails.value.trim() : undefined,
+    cancelledAt: `${new Date().toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })} ${currentTimeLabel()}`,
+    cancelledById: activeStaffUser.value.id,
+    cancelledByName: activeStaffUser.value.name,
+    previousStatus,
+    signatureRevoked,
+  };
+  encounter.status = "cancelled";
+
+  if (activeVisitId.value === encounter.id) {
+    visitRecordingActive.value = false;
+    visitRecordingSeconds.value = 0;
+    clearVisitRecordingTimer();
+    clearVisitElapsedTimer();
+    activeVisitId.value = null;
+    visitStopConfirmOpen.value = false;
+  }
+  if (activeReviewVisitId.value === encounter.id) {
+    activeReviewVisitId.value = null;
+    revisionModalSectionId.value = null;
+    revisionModalThreadId.value = null;
+    signEncounterConfirmOpen.value = false;
+    activeView.value = "provider-home";
+  }
+
+  readNotificationIds.value = readNotificationIds.value.filter(
+    (id) => id !== `encounter-review-${encounter.id}`,
+  );
+  encounterCancellationFeedback.value = `${encounter.visitType} visit canceled. It is hidden from normal SAGE views and remains stored locally.`;
+  closeCancelVisit();
 }
 
 function setSignatureMode(mode: SignatureMethod) {
@@ -6917,14 +7456,6 @@ function goToSignatureSettings() {
   nextTick(() => {
     document.getElementById("provider-signature-settings")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
-}
-
-function resetMockEncounterWorkflow() {
-  providerVisitsState.value = cloneInitialProviderVisits();
-  activeVisitId.value = null;
-  activeReviewVisitId.value = null;
-  readNotificationIds.value = readNotificationIds.value.filter((id) => !id.startsWith("encounter-review-"));
-  signatureSavedMessage.value = "Mock encounter workflow reset.";
 }
 
 function createProviderNote(source: ProviderNoteSource, body: string) {
@@ -7309,6 +7840,8 @@ function signOut() {
 }
 
 function confirmSignOut() {
+  cancelMessageVoiceRecording();
+  stopVoicePlayback();
   clearProviderRecordingTimer();
   clearCnaRecordingTimer();
   providerRecordingActive.value = false;
@@ -7332,6 +7865,15 @@ function confirmSignOut() {
 function isSageNav(view: ViewName) {
   return view === "ai" || view === "provider-sage";
 }
+
+onBeforeUnmount(() => {
+  clearMessageVoiceTimer();
+  clearVoicePlaybackTimer();
+  clearProviderRecordingTimer();
+  clearCnaRecordingTimer();
+  clearVisitRecordingTimer();
+  clearVisitElapsedTimer();
+});
 </script>
 
 <template>
@@ -7686,9 +8228,16 @@ function isSageNav(view: ViewName) {
           <button class="icon-button" type="button" aria-label="Back to resident encounters" @click="returnToResidentEncounters">
             <ArrowLeft :size="19" />
           </button>
-          <div class="title-stack">
+          <div class="title-stack encounter-review-title-stack">
             <h1>Review Encounter</h1>
-            <p>{{ activeReviewEncounter.residentName }} · {{ activeReviewEncounter.visitType }}</p>
+            <div class="encounter-review-header-meta">
+              <span class="encounter-review-header-scribe">
+                <span>Assigned Scribe(s):</span>
+                <strong>{{ scribeDisplayName(activeReviewEncounter.assignedScribe) }}</strong>
+              </span>
+              <span class="encounter-review-header-separator" aria-hidden="true">·</span>
+              <span class="chip compact warning">Needs Review</span>
+            </div>
           </div>
           <div class="encounter-review-header-actions" :class="{ 'has-revisions': activeReviewHasOpenRevisions }">
             <label class="review-all-switch header-review-all" :class="{ disabled: activeReviewHasOpenRevisions }">
@@ -7723,41 +8272,38 @@ function isSageNav(view: ViewName) {
           <article class="panel encounter-print-document">
             <header class="encounter-document-facility">
               <strong>{{ residentFacility(activeReviewResident) }}</strong>
-              <span>{{ facilityDocumentDetails[residentFacility(activeReviewResident)].address }}</span>
-              <span>
-                Tel: {{ facilityDocumentDetails[residentFacility(activeReviewResident)].phone }} ·
-                Fax: {{ facilityDocumentDetails[residentFacility(activeReviewResident)].fax }}
+              <span class="facility-address">{{ facilityDocumentDetails[residentFacility(activeReviewResident)].address }}</span>
+              <span class="facility-contact">
+                <span>Tel:</span>
+                <strong>{{ facilityDocumentDetails[residentFacility(activeReviewResident)].phone }}</strong>
+                <span aria-hidden="true">·</span>
+                <span>Fax:</span>
+                <strong>{{ facilityDocumentDetails[residentFacility(activeReviewResident)].fax }}</strong>
               </span>
             </header>
 
             <section class="encounter-document-patient">
               <div class="encounter-document-title-row">
                 <div>
-                  <span>{{ activeReviewEncounter.documentTitle }}</span>
-                  <h2>{{ activeReviewResident.name.toUpperCase() }} ({{ activeReviewResident.sex }})</h2>
+                  <h2>{{ formatDocumentResidentName(activeReviewResident) }}</h2>
                   <p>
-                    Encounter ID: {{ activeReviewEncounter.id.toUpperCase() }} ·
-                    DOB: {{ mockResidentDateOfBirth(activeReviewResident) }} ·
-                    <strong>{{ activeReviewResident.codeStatus }}</strong>
+                    Rec ID: <span class="document-identity-value">ENCT0000234</span> ·
+                    DoB (Age):
+                    <span class="document-identity-value">{{ mockResidentDateOfBirth(activeReviewResident) }} ({{ activeReviewResident.age }})</span>
                   </p>
                 </div>
-                <span class="chip compact warning">Needs Review</span>
               </div>
 
               <dl class="encounter-document-metadata">
                 <div><dt>Date of Service</dt><dd>{{ formatDocumentDate(activeReviewEncounter.scheduledDate) }}</dd></div>
                 <div><dt>Visit Type</dt><dd>{{ activeReviewEncounter.visitType }}</dd></div>
-                <div><dt>Attending Provider</dt><dd>{{ activeReviewEncounter.providerName }}</dd></div>
-                <div><dt>Assigned Scribe</dt><dd>{{ activeReviewEncounter.assignedScribe ?? "Mark Rivera, Scribe" }}</dd></div>
+                <div><dt>Attending Provider(s)</dt><dd>{{ activeReviewEncounter.providerName }}</dd></div>
+                <div><dt>Referring Provider(s)</dt><dd>—</dd></div>
               </dl>
             </section>
 
             <div class="encounter-document-body-heading">
-              <div>
-                <h3>Progress Notes</h3>
-                <span>{{ activeReviewEncounter.startedAt }} – {{ activeReviewEncounter.endedAt ?? activeReviewEncounter.notesPlusSyncedAt }}</span>
-              </div>
-              <span class="document-encounter-id">{{ activeReviewEncounter.id.toUpperCase() }}</span>
+              <h3>Progress Notes</h3>
             </div>
 
             <div class="encounter-document-sections">
@@ -7770,7 +8316,12 @@ function isSageNav(view: ViewName) {
                 <header class="encounter-section-header">
                   <div class="encounter-section-title">
                     <h2>{{ section.title }}</h2>
-                    <span class="section-record-status">New</span>
+                    <span class="section-record-status">
+                      <span class="section-record-status-icon" aria-hidden="true">
+                        <FileText :size="9" :stroke-width="2.5" />
+                      </span>
+                      In Review
+                    </span>
                     <small v-if="section.revisedAt">Revised by Scribe · {{ section.revisedAt }}</small>
                   </div>
                   <div class="encounter-section-actions">
@@ -7855,7 +8406,15 @@ function isSageNav(view: ViewName) {
                     { 'content-long-form': section.id === 'review-of-systems' || section.id === 'physical-exam' },
                   ]"
                 >
-                  <template v-if="section.id === 'vital-signs'">
+                  <template v-if="section.id === 'code-status'">
+                    <ul class="encounter-code-status-summary">
+                      <li class="code-status-primary">
+                        {{ codeStatusDetails(activeReviewResident.codeStatus).label }}
+                      </li>
+                      <li>{{ codeStatusDetails(activeReviewResident.codeStatus).text }}</li>
+                    </ul>
+                  </template>
+                  <template v-else-if="section.id === 'vital-signs'">
                     <ul class="encounter-reference-list-grid encounter-vitals-grid">
                       <li v-for="(item, itemIndex) in section.content" :key="itemIndex">
                         <strong>{{ item.label }}</strong>
@@ -7874,8 +8433,17 @@ function isSageNav(view: ViewName) {
                   <template v-else-if="section.id === 'family-history'">
                     <div class="encounter-family-grid">
                       <article v-for="(item, itemIndex) in section.content" :key="itemIndex" class="encounter-family-card">
-                        <strong>{{ item.label }}</strong>
-                        <span>{{ item.text }}</span>
+                        <strong class="encounter-family-relation">{{ item.label }}</strong>
+                        <div class="encounter-family-details">
+                          <div class="encounter-family-condition">
+                            <strong>Conditions:</strong>
+                            <ul>
+                              <li>{{ familyHistoryField(item.text, "Condition") }}</li>
+                            </ul>
+                          </div>
+                          <p><strong>Deceased:</strong> {{ familyHistoryField(item.text, "Deceased") }}</p>
+                          <p><strong>Age of Onset:</strong> {{ familyHistoryField(item.text, "Age of onset") }}</p>
+                        </div>
                       </article>
                     </div>
                   </template>
@@ -8009,8 +8577,8 @@ function isSageNav(view: ViewName) {
 
         <div v-if="residentTab === 'situation'" class="detail-grid content-frame">
           <article class="panel patient-focus-panel">
-            <div class="notes-panel-header">
-              <div>
+            <div class="notes-panel-header patient-focus-header">
+              <div class="patient-focus-headline">
                 <div class="section-label">Patient Focus</div>
                 <h2>{{ selectedResidentOpportunity?.category ?? selectedResident.latest }}</h2>
               </div>
@@ -8227,23 +8795,45 @@ function isSageNav(view: ViewName) {
 
         <div v-else-if="residentTab === 'talk'" class="chat-screen resident-chat">
           <div class="message-stream">
-            <div
-              v-for="message in residentChat"
-              :key="message.id"
-              class="bubble"
-              :class="message.sender === 'user' ? 'me' : 'sage'"
-            >
-              {{ message.text }}
-            </div>
+            <template v-for="message in residentChat" :key="message.id">
+              <VoiceMessageBubble
+                v-if="message.kind === 'voice-message'"
+                :duration-seconds="message.durationSeconds ?? 1"
+                :playing="isVoiceMessagePlaying(message.id)"
+                :mine="message.sender === 'user'"
+                @toggle="toggleVoicePlayback(message.id, message.durationSeconds ?? 1)"
+              />
+              <div v-else class="bubble" :class="message.sender === 'user' ? 'me' : 'sage'">
+                {{ message.text }}
+              </div>
+            </template>
           </div>
           <form class="composer" @submit.prevent="sendResidentChat">
-            <input v-model="residentDraft" type="text" placeholder="Ask Sage..." />
-            <button type="button" class="icon-button" aria-label="Voice input">
-              <Mic :size="17" />
-            </button>
-            <button class="send-button" type="submit" aria-label="Send resident message">
-              <Send :size="17" />
-            </button>
+            <VoiceRecordingControls
+              v-if="isVoiceTargetActive('resident-chat')"
+              :phase="voiceComposerPhase('resident-chat')"
+              :seconds="voiceComposerSeconds('resident-chat')"
+              :playing="isVoiceMessagePlaying(voicePreviewId('resident-chat'))"
+              @cancel="cancelMessageVoiceRecording"
+              @stop="stopMessageVoiceRecording('resident-chat')"
+              @rerecord="restartMessageVoiceRecording('resident-chat')"
+              @toggle-play="toggleVoicePlayback(voicePreviewId('resident-chat'), voiceComposerSeconds('resident-chat'))"
+              @send="sendMessageVoiceRecording('resident-chat')"
+            />
+            <template v-else>
+              <input v-model="residentDraft" type="text" placeholder="Ask Sage..." />
+              <button
+                type="button"
+                class="icon-button"
+                aria-label="Record a voice message"
+                @click="startMessageVoiceRecording('resident-chat')"
+              >
+                <Mic :size="17" />
+              </button>
+              <button class="send-button" type="submit" aria-label="Send resident message">
+                <Send :size="17" />
+              </button>
+            </template>
           </form>
         </div>
 
@@ -8260,6 +8850,11 @@ function isSageNav(view: ViewName) {
                   Add Encounter Note
                 </button>
               </div>
+
+              <p v-if="encounterCancellationFeedback" class="encounter-cancel-feedback" role="status">
+                <CheckCircle :size="16" />
+                {{ encounterCancellationFeedback }}
+              </p>
 
               <div v-if="selectedResidentVisits.length" class="visit-card-list">
                 <article
@@ -8288,13 +8883,19 @@ function isSageNav(view: ViewName) {
                     {{ visitSyncSummary(visit) }}
                   </p>
                   <div v-if="visit.assignedScribe || visit.signedSignature" class="encounter-routing-meta">
-                    <span v-if="visit.assignedScribe"><strong>Scribe:</strong> {{ visit.assignedScribe }}</span>
+                    <span v-if="visit.assignedScribe"><strong>Scribe:</strong> {{ scribeDisplayName(visit.assignedScribe) }}</span>
                     <span v-if="visit.signedSignature"><strong>Signed:</strong> {{ visit.signedSignature.signedAt }}</span>
                   </div>
-                  <div
-                    v-if="['scheduled', 'provider-in-progress', 'needs-review', 'revision'].includes(visit.status)"
-                    class="encounter-card-actions"
-                  >
+                  <div class="encounter-card-actions">
+                    <button
+                      v-if="visit.status === 'submitted-to-billing' && visit.signedSignature?.providerId === activeStaffUser.id"
+                      class="danger-action compact-action"
+                      type="button"
+                      @click="requestRevokeEncounterSignature(visit)"
+                    >
+                      <Undo2 :size="15" />
+                      Revoke Signature
+                    </button>
                     <button
                       v-if="visit.status === 'needs-review'"
                       class="primary-action compact-action"
@@ -8305,7 +8906,7 @@ function isSageNav(view: ViewName) {
                       Start Review
                     </button>
                     <button
-                      v-else-if="visit.status === 'revision'"
+                      v-if="visit.status === 'revision'"
                       class="soft-action compact-action mock-sync-action"
                       type="button"
                       @click="simulateScribeResubmission(visit)"
@@ -8315,13 +8916,21 @@ function isSageNav(view: ViewName) {
                       <small>Mock Notes+ sync</small>
                     </button>
                     <button
-                      v-else
+                      v-if="visit.status === 'scheduled' || visit.status === 'provider-in-progress'"
                       class="primary-action compact-action"
                       type="button"
                       @click="startScheduledEncounter(visit)"
                     >
                       <FileText :size="15" />
                       {{ visit.status === "provider-in-progress" ? "Continue Encounter" : "Start Encounter" }}
+                    </button>
+                    <button
+                      class="danger-action compact-action cancel-visit-action"
+                      type="button"
+                      @click="openCancelVisit(visit)"
+                    >
+                      <Trash2 :size="15" />
+                      Cancel Visit
                     </button>
                   </div>
                 </article>
@@ -9059,6 +9668,14 @@ function isSageNav(view: ViewName) {
               </div>
             </article>
 
+            <VoiceMessageBubble
+              v-else-if="message.kind === 'voice-message'"
+              :duration-seconds="message.durationSeconds"
+              :playing="isVoiceMessagePlaying(message.id)"
+              mine
+              @toggle="toggleVoicePlayback(message.id, message.durationSeconds)"
+            />
+
             <article v-else class="bubble structured" :class="message.from === 'me' ? 'me' : 'sage'">
               <p>{{ message.text }}</p>
               <ul v-if="message.bullets?.length">
@@ -9086,13 +9703,31 @@ function isSageNav(view: ViewName) {
         </div>
 
         <form class="composer" @submit.prevent="sendAi(aiDraft)">
-          <input v-model="aiDraft" type="text" placeholder="Ask Sage anything... @ to tag" />
-          <button type="button" class="icon-button" aria-label="Voice input">
-            <Mic :size="17" />
-          </button>
-          <button class="send-button" type="submit" aria-label="Send message to Sage">
-            <Send :size="17" />
-          </button>
+          <VoiceRecordingControls
+            v-if="isVoiceTargetActive('sage')"
+            :phase="voiceComposerPhase('sage')"
+            :seconds="voiceComposerSeconds('sage')"
+            :playing="isVoiceMessagePlaying(voicePreviewId('sage'))"
+            @cancel="cancelMessageVoiceRecording"
+            @stop="stopMessageVoiceRecording('sage')"
+            @rerecord="restartMessageVoiceRecording('sage')"
+            @toggle-play="toggleVoicePlayback(voicePreviewId('sage'), voiceComposerSeconds('sage'))"
+            @send="sendMessageVoiceRecording('sage')"
+          />
+          <template v-else>
+            <input v-model="aiDraft" type="text" placeholder="Ask Sage anything... @ to tag" />
+            <button
+              type="button"
+              class="icon-button"
+              aria-label="Record a voice message"
+              @click="startMessageVoiceRecording('sage')"
+            >
+              <Mic :size="17" />
+            </button>
+            <button class="send-button" type="submit" aria-label="Send message to Sage">
+              <Send :size="17" />
+            </button>
+          </template>
         </form>
       </section>
 
@@ -9795,18 +10430,22 @@ function isSageNav(view: ViewName) {
             <footer>{{ filteredProviderOpportunities[0].confidence }}% confidence · {{ opportunitySourceSummary(filteredProviderOpportunities[0]) }}</footer>
           </article>
 
-          <article
-            v-for="message in providerSageMessages"
-            :key="message.id"
-            class="bubble structured"
-            :class="message.from === 'me' ? 'me' : 'sage'"
-          >
-            <p>{{ message.text }}</p>
-            <ul v-if="message.bullets?.length">
-              <li v-for="bullet in message.bullets" :key="bullet">{{ bullet }}</li>
-            </ul>
-            <footer v-if="message.footer">{{ message.footer }}</footer>
-          </article>
+          <template v-for="message in providerSageMessages" :key="message.id">
+            <VoiceMessageBubble
+              v-if="message.kind === 'voice-message'"
+              :duration-seconds="message.durationSeconds"
+              :playing="isVoiceMessagePlaying(message.id)"
+              mine
+              @toggle="toggleVoicePlayback(message.id, message.durationSeconds)"
+            />
+            <article v-else class="bubble structured" :class="message.from === 'me' ? 'me' : 'sage'">
+              <p>{{ message.text }}</p>
+              <ul v-if="message.bullets?.length">
+                <li v-for="bullet in message.bullets" :key="bullet">{{ bullet }}</li>
+              </ul>
+              <footer v-if="message.footer">{{ message.footer }}</footer>
+            </article>
+          </template>
         </div>
 
         <div v-if="remainingPrompts.length" class="prompt-rail">
@@ -9826,13 +10465,31 @@ function isSageNav(view: ViewName) {
         </div>
 
         <form class="composer" @submit.prevent="sendAi(aiDraft)">
-          <input v-model="aiDraft" type="text" placeholder="Capture observation or ask Sage..." />
-          <button type="button" class="icon-button" aria-label="Voice input">
-            <Mic :size="17" />
-          </button>
-          <button class="send-button" type="submit" aria-label="Send provider note">
-            <Send :size="17" />
-          </button>
+          <VoiceRecordingControls
+            v-if="isVoiceTargetActive('sage')"
+            :phase="voiceComposerPhase('sage')"
+            :seconds="voiceComposerSeconds('sage')"
+            :playing="isVoiceMessagePlaying(voicePreviewId('sage'))"
+            @cancel="cancelMessageVoiceRecording"
+            @stop="stopMessageVoiceRecording('sage')"
+            @rerecord="restartMessageVoiceRecording('sage')"
+            @toggle-play="toggleVoicePlayback(voicePreviewId('sage'), voiceComposerSeconds('sage'))"
+            @send="sendMessageVoiceRecording('sage')"
+          />
+          <template v-else>
+            <input v-model="aiDraft" type="text" placeholder="Capture observation or ask Sage..." />
+            <button
+              type="button"
+              class="icon-button"
+              aria-label="Record a voice message"
+              @click="startMessageVoiceRecording('sage')"
+            >
+              <Mic :size="17" />
+            </button>
+            <button class="send-button" type="submit" aria-label="Send provider note">
+              <Send :size="17" />
+            </button>
+          </template>
         </form>
       </section>
 
@@ -10463,6 +11120,18 @@ function isSageNav(view: ViewName) {
                   </button>
                 </span>
               </template>
+              <template v-else-if="message.kind === 'voice-message'">
+                <small v-if="selectedThread.kind === 'huddle' && !isCurrentUser(message.authorId)">
+                  {{ authorName(message.authorId) }}
+                </small>
+                <VoiceMessageBubble
+                  :duration-seconds="message.durationSeconds ?? 1"
+                  :playing="isVoiceMessagePlaying(message.id)"
+                  :mine="isCurrentUser(message.authorId)"
+                  @toggle="toggleVoicePlayback(message.id, message.durationSeconds ?? 1)"
+                />
+                <time>{{ message.ts }}</time>
+              </template>
               <template v-else>
                 <small v-if="selectedThread.kind === 'huddle' && !isCurrentUser(message.authorId)">
                   {{ authorName(message.authorId) }}
@@ -10476,13 +11145,84 @@ function isSageNav(view: ViewName) {
           </div>
 
           <form class="composer" @submit.prevent="sendThreadMessage">
-            <input v-model="threadDraft" type="text" placeholder="Message... type @ to tag a resident" />
-            <button type="button" class="icon-button" aria-label="Voice input">
-              <Mic :size="17" />
-            </button>
-            <button class="send-button" type="submit" aria-label="Send thread message">
-              <Send :size="17" />
-            </button>
+            <VoiceRecordingControls
+              v-if="isVoiceTargetActive(threadVoiceTarget(selectedThread.id))"
+              :phase="voiceComposerPhase(threadVoiceTarget(selectedThread.id))"
+              :seconds="voiceComposerSeconds(threadVoiceTarget(selectedThread.id))"
+              :playing="isVoiceMessagePlaying(voicePreviewId(threadVoiceTarget(selectedThread.id)))"
+              @cancel="cancelMessageVoiceRecording"
+              @stop="stopMessageVoiceRecording(threadVoiceTarget(selectedThread.id))"
+              @rerecord="restartMessageVoiceRecording(threadVoiceTarget(selectedThread.id))"
+              @toggle-play="toggleVoicePlayback(voicePreviewId(threadVoiceTarget(selectedThread.id)), voiceComposerSeconds(threadVoiceTarget(selectedThread.id)))"
+              @send="sendMessageVoiceRecording(threadVoiceTarget(selectedThread.id))"
+            />
+            <template v-else>
+              <div
+                v-if="threadMentionOpen"
+                id="thread-resident-mentions"
+                class="thread-mention-menu panel"
+                role="listbox"
+                aria-label="Tag a resident"
+              >
+                <div class="thread-mention-heading">
+                  <strong>Tag a resident</strong>
+                  <small v-if="threadMentionQuery.trim()">Matches “{{ threadMentionQuery.trim() }}”</small>
+                  <small v-else>Start typing a name or room</small>
+                </div>
+                <div v-if="threadMentionSuggestions.length" class="thread-mention-options">
+                  <button
+                    v-for="(resident, index) in threadMentionSuggestions"
+                    :id="`thread-mention-${resident.id}`"
+                    :key="resident.id"
+                    type="button"
+                    role="option"
+                    :aria-selected="threadMentionActiveIndex === index"
+                    :class="{ active: threadMentionActiveIndex === index }"
+                    @mouseenter="threadMentionActiveIndex = index"
+                    @mousedown.prevent="selectThreadMention(resident)"
+                    @click="selectThreadMention(resident)"
+                  >
+                    <img :src="resident.image" :alt="resident.name" />
+                    <span>
+                      <strong>{{ resident.name }}</strong>
+                      <small>Room {{ resident.room }} · {{ residentFacility(resident) }}</small>
+                    </span>
+                    <span class="thread-mention-tag">{{ residentTag(resident) }}</span>
+                  </button>
+                </div>
+                <p v-else class="thread-mention-empty">No residents match that tag.</p>
+              </div>
+              <input
+                ref="threadDraftInput"
+                v-model="threadDraft"
+                type="text"
+                placeholder="Message... type @ to tag a resident"
+                autocomplete="off"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls="thread-resident-mentions"
+                :aria-expanded="threadMentionOpen"
+                :aria-activedescendant="threadMentionOpen && threadMentionSuggestions[threadMentionActiveIndex] ? `thread-mention-${threadMentionSuggestions[threadMentionActiveIndex].id}` : undefined"
+                @input="updateThreadMention"
+                @keydown.down="moveThreadMentionSelection($event, 1)"
+                @keydown.up="moveThreadMentionSelection($event, -1)"
+                @keydown.enter="selectActiveThreadMention"
+                @keydown.tab="selectActiveThreadMention"
+                @keydown.esc="closeThreadMentionFromKeyboard"
+                @blur="deferCloseThreadMention"
+              />
+              <button
+                type="button"
+                class="icon-button"
+                aria-label="Record a voice message"
+                @click="startMessageVoiceRecording(threadVoiceTarget(selectedThread.id))"
+              >
+                <Mic :size="17" />
+              </button>
+              <button class="send-button" type="submit" aria-label="Send thread message">
+                <Send :size="17" />
+              </button>
+            </template>
           </form>
         </template>
 
@@ -10823,10 +11563,7 @@ function isSageNav(view: ViewName) {
               <button v-if="currentProviderSignature" class="soft-action" type="button" @click="removeProviderSignature">
                 <Trash2 :size="15" /> Remove Signature
               </button>
-              <button class="soft-action" type="button" @click="resetMockEncounterWorkflow">
-                <Undo2 :size="15" /> Reset Mock Encounters
-              </button>
-              <button class="primary-action" type="button" @click="saveProviderSignature">
+              <button class="primary-action compact-action" type="button" @click="saveProviderSignature">
                 <Check :size="16" /> Save Signature
               </button>
             </div>
@@ -11812,6 +12549,84 @@ function isSageNav(view: ViewName) {
           <button class="soft-action" type="button" @click="signEncounterConfirmOpen = false">Cancel</button>
           <button class="primary-action" type="button" @click="confirmEncounterSignature">
             <Signature :size="16" /> Confirm & Sign
+          </button>
+        </div>
+      </article>
+    </div>
+
+    <div v-if="revokeSignatureEncounter" class="modal-backdrop" @click="closeRevokeEncounterSignature">
+      <article class="modal-card" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeRevokeEncounterSignature">
+          <X :size="18" />
+        </button>
+        <span class="signature-modal-icon"><Undo2 :size="24" /></span>
+        <h2>Revoke encounter signature?</h2>
+        <p>
+          This removes the signature from {{ revokeSignatureEncounter.residentName }}'s encounter and returns it to Needs Review.
+          All section verification will be cleared so the corrected encounter can be reviewed and signed again.
+        </p>
+        <div class="delegate-summary">
+          <span><strong>Signed by:</strong> {{ revokeSignatureEncounter.signedSignature?.providerName }}</span>
+          <span><strong>Signed:</strong> {{ revokeSignatureEncounter.signedSignature?.signedAt }}</span>
+        </div>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="closeRevokeEncounterSignature">Cancel</button>
+          <button class="danger-action" type="button" @click="confirmRevokeEncounterSignature">
+            <Undo2 :size="16" /> Revoke Signature
+          </button>
+        </div>
+      </article>
+    </div>
+
+    <div v-if="cancelVisitEncounter" class="modal-backdrop" @click="closeCancelVisit">
+      <article class="modal-card profile-modal cancel-visit-modal" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeCancelVisit">
+          <X :size="18" />
+        </button>
+        <span class="signature-modal-icon danger"><Trash2 :size="24" /></span>
+        <h2>Cancel visit?</h2>
+        <p>
+          This visit will remain stored locally, but it will be hidden from normal SAGE encounter views.
+        </p>
+        <div class="delegate-summary">
+          <span><strong>Resident:</strong> {{ cancelVisitEncounter.residentName }}</span>
+          <span><strong>Visit:</strong> {{ cancelVisitEncounter.visitType }}</span>
+          <span><strong>Date:</strong> {{ cancelVisitEncounter.scheduledDate }} · {{ cancelVisitEncounter.scheduledTime }}</span>
+        </div>
+        <div class="modal-form cancel-visit-form">
+          <label>
+            Cancellation reason
+            <AppSelect
+              v-model="cancelVisitReason"
+              :options="cancellationReasonOptions"
+              aria-label="Cancellation reason"
+            />
+          </label>
+          <label v-if="cancelVisitReason === 'Other'">
+            Explanation
+            <textarea
+              v-model="cancelVisitDetails"
+              rows="3"
+              placeholder="Describe why this visit is being canceled"
+              required
+            />
+            <small class="form-hint">Required when Other is selected.</small>
+          </label>
+        </div>
+        <p v-if="cancelVisitEncounter.signedSignature" class="cancel-signature-warning">
+          <AlertTriangle :size="16" />
+          The attached provider signature and all section verification will be cleared automatically.
+        </p>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="closeCancelVisit">Keep Visit</button>
+          <button
+            class="danger-action"
+            type="button"
+            :disabled="!canConfirmCancelVisit"
+            @click="confirmCancelVisit"
+          >
+            <Trash2 :size="16" />
+            Confirm Cancel Visit
           </button>
         </div>
       </article>
