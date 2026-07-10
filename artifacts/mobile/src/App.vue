@@ -3161,6 +3161,10 @@ function threadDisplayTitle(thread: Thread) {
   return thread.title;
 }
 
+function threadMemberCount(thread: Thread) {
+  return uniqueIds(thread.members.map((member) => normalizeActorId(member))).length;
+}
+
 function threadSubtitle(thread: Thread) {
   const resident = threadResident(thread);
   if (resident) {
@@ -6436,11 +6440,22 @@ function openThread(thread: Thread) {
   cancelMessageVoiceRecording();
   stopVoicePlayback();
   closeThreadMention();
-  if (thread.unread > 0 || !visibleThreads.value.some((entry) => entry.id === thread.id)) {
-    createLocalThread({ ...thread, unread: 0 });
+  const joinsResidentRoom =
+    thread.purpose === "resident-room" &&
+    !thread.members.some((member) => normalizeActorId(member) === activeStaffUser.value.id);
+  const openedThread = joinsResidentRoom
+    ? { ...thread, members: [...thread.members, activeStaffUser.value.id], unread: 0 }
+    : { ...thread, unread: 0 };
+
+  if (
+    joinsResidentRoom ||
+    thread.unread > 0 ||
+    !visibleThreads.value.some((entry) => entry.id === thread.id)
+  ) {
+    createLocalThread(openedThread);
   }
   selectedThreadId.value = thread.id;
-  threadMessages.value = [...thread.messages];
+  threadMessages.value = [...openedThread.messages];
   threadMenuOpen.value = false;
   closeThreadUtilityModal();
 }
@@ -11038,20 +11053,48 @@ onBeforeUnmount(() => {
                 <h1>{{ threadDisplayTitle(selectedThread) }}</h1>
                 <p>
                   <template v-if="threadResident(selectedThread)">
-                    Room {{ threadResident(selectedThread)?.room }} · Resident care team · {{ selectedThread.members.length }} members
+                    Room {{ threadResident(selectedThread)?.room }} · {{ threadMemberCount(selectedThread) }} members
                   </template>
                   <template v-else>
-                    {{ selectedThread.kind === "huddle" ? `${selectedThread.members.length} member staff group` : "Direct message" }}
+                    {{ selectedThread.kind === "huddle" ? `${threadMemberCount(selectedThread)} member staff group` : "Direct message" }}
                   </template>
                 </p>
               </div>
+              <div class="thread-title-utilities">
+                <button class="icon-button" type="button" aria-label="Start voice call" @click="startThreadCall('voice-call')">
+                  <Phone :size="18" />
+                </button>
+                <button class="icon-button" type="button" aria-label="Start video call" @click="startThreadCall('video-call')">
+                  <Video :size="18" />
+                </button>
+                <div class="thread-menu-wrap">
+                  <button
+                    class="icon-button"
+                    type="button"
+                    aria-label="Thread menu"
+                    :aria-expanded="threadMenuOpen"
+                    @click="toggleThreadMenu"
+                  >
+                    <MoreVertical :size="18" />
+                  </button>
+
+                  <div v-if="threadMenuOpen" class="thread-menu panel">
+                    <button type="button" @click="openThreadSummary"><FileText :size="16" /> View summary</button>
+                    <button type="button" @click="openThreadInsight"><Zap :size="16" /> View Insight</button>
+                    <button v-if="canRenameThread(selectedThread)" type="button" @click="openThreadRenameModal">
+                      <Edit3 :size="16" />
+                      Rename huddle
+                    </button>
+                    <button v-if="selectedRole === 'don'" type="button" @click="openActionRequestFromThread">
+                      <Send :size="16" />
+                      Assign action
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div
-              class="thread-header-actions"
-              :class="{ 'compact-thread-actions': !threadResident(selectedThread) }"
-            >
+            <div v-if="threadResident(selectedThread)" class="thread-header-actions">
               <button
-                v-if="threadResident(selectedThread)"
                 class="soft-action compact-action thread-context-action"
                 type="button"
                 @click="openSelectedThreadResident"
@@ -11060,7 +11103,6 @@ onBeforeUnmount(() => {
                 View Resident
               </button>
               <button
-                v-if="threadResident(selectedThread)"
                 class="soft-action compact-action thread-context-action"
                 type="button"
                 @click="scheduleSelectedThreadHuddle"
@@ -11068,36 +11110,6 @@ onBeforeUnmount(() => {
                 <CalendarDays :size="15" />
                 Schedule Huddle
               </button>
-              <button class="icon-button" type="button" aria-label="Start voice call" @click="startThreadCall('voice-call')">
-                <Phone :size="18" />
-              </button>
-              <button class="icon-button" type="button" aria-label="Start video call" @click="startThreadCall('video-call')">
-                <Video :size="18" />
-              </button>
-              <div class="thread-menu-wrap">
-                <button
-                  class="icon-button"
-                  type="button"
-                  aria-label="Thread menu"
-                  :aria-expanded="threadMenuOpen"
-                  @click="toggleThreadMenu"
-                >
-                  <MoreVertical :size="18" />
-                </button>
-
-                <div v-if="threadMenuOpen" class="thread-menu panel">
-                  <button type="button" @click="openThreadSummary"><FileText :size="16" /> View summary</button>
-                  <button type="button" @click="openThreadInsight"><Zap :size="16" /> View Insight</button>
-                  <button v-if="canRenameThread(selectedThread)" type="button" @click="openThreadRenameModal">
-                    <Edit3 :size="16" />
-                    Rename huddle
-                  </button>
-                  <button v-if="selectedRole === 'don'" type="button" @click="openActionRequestFromThread">
-                    <Send :size="16" />
-                    Assign action
-                  </button>
-                </div>
-              </div>
             </div>
           </header>
 

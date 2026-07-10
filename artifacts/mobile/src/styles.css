@@ -760,6 +760,13 @@ input[type="radio"] {
   overflow: visible;
 }
 
+.header-menu-cluster .notification-trigger,
+.header-menu-cluster .profile-menu-trigger {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+}
+
 .notification-trigger[aria-expanded="true"] {
   color: var(--icon-accent);
   border-color: rgba(132, 94, 194, 0.32);
@@ -3109,6 +3116,7 @@ input[type="radio"] {
 .thread-header .title-stack {
   min-width: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .thread-header h1 {
@@ -3116,6 +3124,29 @@ input[type="radio"] {
   font-size: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.thread-title-utilities {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+@media (min-width: 720px) {
+  .thread-header-main {
+    display: contents;
+  }
+
+  .thread-header-actions {
+    order: 1;
+  }
+
+  .thread-title-utilities {
+    order: 2;
+    margin-left: 0;
+  }
 }
 
 .thread-list {
@@ -5623,7 +5654,7 @@ input[role="switch"]:checked::before {
 
   .thread-header-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px 40px 40px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     flex: 1 0 100%;
     width: 100%;
     justify-content: flex-start;
@@ -5631,20 +5662,11 @@ input[role="switch"]:checked::before {
     margin-left: 0;
   }
 
-  .thread-header-actions.compact-thread-actions {
-    display: flex;
-    flex: 0 0 auto;
-    width: auto;
-    justify-content: flex-end;
-    gap: var(--space-1);
-    margin-left: 0;
-  }
-
   .thread-header.compact-thread-header .title-stack {
     min-width: 0;
   }
 
-  .thread-header.compact-thread-header .title-stack p {
+  .thread-header .title-stack p {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -5655,22 +5677,26 @@ input[role="switch"]:checked::before {
     min-width: 0;
     width: 100%;
     justify-content: center;
-    padding-inline: var(--space-2);
+    gap: 6px;
+    padding-inline: var(--space-3);
     font-size: 12px;
   }
 
-  .thread-header-actions > .icon-button,
-  .thread-menu-wrap > .icon-button {
+  .thread-header-actions .thread-context-action svg {
+    display: block;
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+  }
+
+  .thread-title-utilities {
+    gap: var(--space-1);
+  }
+
+  .thread-title-utilities > .icon-button,
+  .thread-title-utilities .thread-menu-wrap > .icon-button {
     flex: 0 0 40px;
     width: 40px;
-  }
-
-  .thread-header-actions .thread-menu-wrap {
-    width: 40px;
-  }
-
-  .thread-header .title-stack p {
-    display: block;
   }
 
   .panel {
