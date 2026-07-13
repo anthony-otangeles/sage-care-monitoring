@@ -117,6 +117,7 @@ type ProviderEncounterStatus =
 type ProviderVisitSyncStatus = "pending" | "synced";
 type EncounterSectionKind = "paragraphs" | "bullets" | "grid";
 type RevisionThreadStatus = "open" | "addressed";
+type EncounterHistoryFilter = "all" | "needs-review" | "done";
 type SignatureMethod = "draw" | "type" | "upload";
 type MessageTab = "rooms" | "people";
 type ScheduleView = "list" | "calendar";
@@ -311,6 +312,8 @@ interface RevisionComment {
   role: "provider" | "scribe";
   body: string;
   createdAt: string;
+  kind?: "text" | "voice";
+  durationSeconds?: number;
 }
 
 interface RevisionThread {
@@ -381,6 +384,18 @@ interface ProviderVisit {
   cancellation?: EncounterCancellation;
 }
 
+interface CareTeamReportSummary {
+  id: string;
+  residentId: string;
+  reporterId: string;
+  reporterName: string;
+  reporterRole: string;
+  reportedAt: string;
+  summary: string;
+  whyItMatters: string;
+  severity: "normal" | "watch" | "high";
+}
+
 interface VoiceComposerState {
   target: VoiceComposerTarget;
   phase: VoiceComposerPhase;
@@ -402,6 +417,11 @@ interface EncounterModalDraft {
 }
 
 interface StartEncounterModalDraft {
+  visitType: VisitType;
+}
+
+interface ProviderHomeEncounterDraft {
+  residentId: string;
   visitType: VisitType;
 }
 
@@ -1503,6 +1523,7 @@ function seededEncounter(
   status: ProviderEncounterStatus,
   visitType: VisitType,
   scheduledTime: string,
+  scheduledDate = todayDateKey(),
 ): ProviderVisit {
   const now = Date.now();
   const textNote = status === "scheduled" ? "" : resident.situation.summary;
@@ -1513,7 +1534,7 @@ function seededEncounter(
     providerUserId: providerUser.id,
     providerName: providerUser.name,
     visitType,
-    scheduledDate: todayDateKey(),
+    scheduledDate,
     scheduledTime,
     clinicalPriority: mockEncounterPriority(resident),
     visitReason: resident.situation.concerns[0]?.title ?? resident.latest,
@@ -1581,6 +1602,13 @@ const mockDailyVisitResidents = priorityResidents
   .filter((resident) => !downstreamMockResidentIds.has(resident.id))
   .slice(0, 4);
 const mockDailyVisitTimes = ["8:15 AM", "9:00 AM", "10:30 AM", "11:15 AM"];
+const mockTomorrowVisitResidents = [residents[4], residents[9], residents[17]];
+const mockTomorrowVisitTimes = ["8:30 AM", "10:00 AM", "1:15 PM"];
+const mockLaterWeekVisits = [
+  { resident: residents[21], offset: 2, time: "9:15 AM" },
+  { resident: residents[24], offset: 3, time: "11:00 AM" },
+  { resident: residents[28], offset: 4, time: "2:00 PM" },
+];
 
 const initialProviderVisits: ProviderVisit[] = [
   needsReviewEncounter,
@@ -1594,6 +1622,26 @@ const initialProviderVisits: ProviderVisit[] = [
       "scheduled",
       mockEncounterVisitType(resident),
       mockDailyVisitTimes[index] ?? "1:00 PM",
+    ),
+  ),
+  ...mockTomorrowVisitResidents.map((resident, index) =>
+    seededEncounter(
+      `enc-tomorrow-${index + 1}`,
+      resident,
+      "scheduled",
+      mockEncounterVisitType(resident),
+      mockTomorrowVisitTimes[index] ?? "1:00 PM",
+      offsetDateKey(1),
+    ),
+  ),
+  ...mockLaterWeekVisits.map(({ resident, offset, time }, index) =>
+    seededEncounter(
+      `enc-week-${index + 1}`,
+      resident,
+      "scheduled",
+      mockEncounterVisitType(resident),
+      time,
+      offsetDateKey(offset),
     ),
   ),
 ];
@@ -1963,10 +2011,13 @@ const providerResidentSearchQuery = ref("");
 const cnaResidentSearchOpen = ref(false);
 const cnaResidentSearchQuery = ref("");
 const scheduleView = ref<ScheduleView>("list");
+const providerScheduleWeekStart = ref(startOfProviderWeek(new Date()));
+const expandedDailyEncounterId = ref<string | null>(null);
+const encounterHistoryFilter = ref<EncounterHistoryFilter>("all");
 const providerNoteDraft = ref("");
 const providerNotesState = ref<ProviderNote[]>([...initialProviderNotes]);
 
-const ENCOUNTER_STORAGE_KEY = "sage.mock.encounters.v4";
+const ENCOUNTER_STORAGE_KEY = "sage.mock.encounters.v5";
 const SIGNATURE_STORAGE_KEY = "sage.mock.provider-signatures.v1";
 
 function cloneInitialProviderVisits() {
@@ -1982,8 +2033,16 @@ function loadPersistedProviderVisits() {
     if (!raw) {
       return cloneInitialProviderVisits();
     }
-    const parsed = JSON.parse(raw) as { version?: number; visits?: ProviderVisit[] };
-    if (parsed.version !== 4 || !Array.isArray(parsed.visits)) {
+    const parsed = JSON.parse(raw) as {
+      version?: number;
+      contextDate?: string;
+      visits?: ProviderVisit[];
+    };
+    if (
+      parsed.version !== 5 ||
+      parsed.contextDate !== todayDateKey() ||
+      !Array.isArray(parsed.visits)
+    ) {
       return cloneInitialProviderVisits();
     }
     return parsed.visits;
@@ -2025,6 +2084,12 @@ const startEncounterResidentId = ref<string | null>(null);
 const startEncounterDraft = ref<StartEncounterModalDraft>({
   visitType: "Follow-Up",
 });
+const providerHomeEncounterModalOpen = ref(false);
+const providerHomeEncounterSearchQuery = ref("");
+const providerHomeEncounterDraft = ref<ProviderHomeEncounterDraft>({
+  residentId: "",
+  visitType: "Follow-Up",
+});
 const expandedProviderNoteId = ref<string | null>(null);
 const encounterModalNoteId = ref<string | null>(null);
 const encounterModalDraft = ref<EncounterModalDraft>({
@@ -2039,6 +2104,10 @@ const providerTranscript = ref("");
 const revisionModalSectionId = ref<string | null>(null);
 const revisionModalThreadId = ref<string | null>(null);
 const revisionModalText = ref("");
+const revisionModalInputKind = ref<"text" | "voice">("text");
+const revisionVoicePhase = ref<VoiceComposerPhase | null>(null);
+const revisionVoiceSeconds = ref(0);
+const revisionTextBeforeRecording = ref("");
 const revisionReplyDrafts = ref<Record<string, string>>({});
 const signatureSetupPromptOpen = ref(false);
 const signEncounterConfirmOpen = ref(false);
@@ -2076,6 +2145,7 @@ let visitRecordingTimer: number | null = null;
 let visitElapsedTimer: number | null = null;
 let messageVoiceTimer: number | null = null;
 let voicePlaybackTimer: number | null = null;
+let revisionVoiceTimer: number | null = null;
 
 const profileStates = ref<Record<RoleKey, ProfileState>>({
   don: { ...initialProfileStates.don, assignedFacilities: [...initialProfileStates.don.assignedFacilities] },
@@ -2122,12 +2192,15 @@ watch(
   providerVisitsState,
   (visits) => {
     try {
-      window.localStorage.setItem(ENCOUNTER_STORAGE_KEY, JSON.stringify({ version: 4, visits }));
+      window.localStorage.setItem(
+        ENCOUNTER_STORAGE_KEY,
+        JSON.stringify({ version: 5, contextDate: todayDateKey(), visits }),
+      );
     } catch {
       // Local persistence is best-effort in this frontend-only prototype.
     }
   },
-  { deep: true },
+  { deep: true, immediate: true },
 );
 
 watch(
@@ -2142,10 +2215,16 @@ watch(
   { deep: true },
 );
 
-function fetchDailyEncountersFromNotesPlus() {
-  // TODO(NOTES_PLUS): Replace the local encounter fixtures with the provider's Daily Visit List API response.
+watch(selectedResidentId, (nextResidentId, previousResidentId) => {
+  if (nextResidentId !== previousResidentId) {
+    encounterHistoryFilter.value = "all";
+  }
+});
+
+function fetchEncountersFromNotesPlus(dateKey: string) {
+  // TODO(NOTES_PLUS): Replace the local encounter fixtures with the provider's visit-list API response.
   return providerVisitsState.value.filter(
-    (encounter) => encounter.scheduledDate === todayDateKey() && encounter.status !== "cancelled",
+    (encounter) => encounter.scheduledDate === dateKey && encounter.status !== "cancelled",
   );
 }
 
@@ -2479,6 +2558,7 @@ const activeReviewEncounter = computed(() =>
     ? providerVisitsState.value.find((visit) => visit.id === activeReviewVisitId.value) ?? null
     : null,
 );
+const activeReviewReadOnly = computed(() => activeReviewEncounter.value?.status === "submitted-to-billing");
 const activeReviewResident = computed(() =>
   activeReviewEncounter.value
     ? residents.find((resident) => resident.id === activeReviewEncounter.value?.residentId) ?? null
@@ -2508,11 +2588,6 @@ const canConfirmCancelVisit = computed(
   () => cancelVisitReason.value !== "Other" || Boolean(cancelVisitDetails.value.trim()),
 );
 const currentProviderSignature = computed(() => providerSignatures.value[activeStaffUser.value.id] ?? null);
-function encounterHasClinicalVisitMerit(encounter: ProviderVisit) {
-  return providerOpportunities.value.some(
-    (opportunity) => opportunity.residentId === encounter.residentId,
-  );
-}
 function encounterTimeSortValue(time: string) {
   const match = time.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (!match) {
@@ -2524,21 +2599,146 @@ function encounterTimeSortValue(time: string) {
   }
   return hours * 60 + Number(match[2]);
 }
-const dailyProviderEncounters = computed(() =>
-  fetchDailyEncountersFromNotesPlus()
+function encounterVisibleToActiveProvider(encounter: ProviderVisit) {
+  if (encounter.providerUserId !== activeStaffUser.value.id) {
+    return false;
+  }
+  const resident = residents.find((entry) => entry.id === encounter.residentId);
+  return !resident || selectedFacility.value === "all" || residentFacility(resident) === selectedFacility.value;
+}
+function openProviderEncountersForDate(dateKey: string) {
+  return fetchEncountersFromNotesPlus(dateKey)
     .filter((encounter) =>
-      encounter.scheduledDate === todayDateKey() &&
       (encounter.status === "scheduled" || encounter.status === "provider-in-progress") &&
-      encounter.providerUserId === activeStaffUser.value.id &&
-      encounterHasClinicalVisitMerit(encounter),
+      encounterVisibleToActiveProvider(encounter),
     )
-    .filter((encounter) => {
-      const resident = residents.find((entry) => entry.id === encounter.residentId);
-      return !resident || selectedFacility.value === "all" || residentFacility(resident) === selectedFacility.value;
-    })
     .slice()
-    .sort((a, b) => encounterTimeSortValue(a.scheduledTime) - encounterTimeSortValue(b.scheduledTime)),
+    .sort((a, b) => encounterTimeSortValue(a.scheduledTime) - encounterTimeSortValue(b.scheduledTime));
+}
+const todayProviderEncounters = computed(() => openProviderEncountersForDate(todayDateKey()));
+const tomorrowProviderEncounters = computed(() => openProviderEncountersForDate(offsetDateKey(1)));
+const displayedDailyEncounterDate = computed(() =>
+  todayProviderEncounters.value.length ? todayDateKey() : offsetDateKey(1),
 );
+const showingTomorrowEncounters = computed(() => displayedDailyEncounterDate.value === offsetDateKey(1));
+const dailyProviderEncounters = computed(() =>
+  showingTomorrowEncounters.value ? tomorrowProviderEncounters.value : todayProviderEncounters.value,
+);
+const dailyEncounterPeriodLabel = computed(() => showingTomorrowEncounters.value ? "tomorrow" : "today");
+const dailyEncounterHeading = computed(() =>
+  showingTomorrowEncounters.value ? "Residents to see tomorrow" : "Residents to see today",
+);
+const dailyEncounterEmptyCopy = computed(() =>
+  showingTomorrowEncounters.value
+    ? "Today’s encounter list is complete, and no visits are scheduled for tomorrow."
+    : "No scheduled encounters for this facility right now.",
+);
+watch(displayedDailyEncounterDate, () => {
+  expandedDailyEncounterId.value = null;
+});
+const providerEncounterWeekLabel = computed(() => {
+  const start = providerScheduleWeekStart.value;
+  const end = addDays(start, 6);
+  const startLabel = start.toLocaleDateString([], { month: "short", day: "numeric" });
+  const endLabel = end.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  return `${startLabel} – ${endLabel}`;
+});
+const providerEncounterWeekDays = computed(() =>
+  Array.from({ length: 7 }, (_, index) => {
+    const date = addDays(providerScheduleWeekStart.value, index);
+    const dateKey = dateKeyFromDate(date);
+    const encounters = providerVisitsState.value
+      .filter((encounter) =>
+        encounter.scheduledDate === dateKey &&
+        encounter.status !== "cancelled" &&
+        encounterVisibleToActiveProvider(encounter),
+      )
+      .slice()
+      .sort((a, b) => encounterTimeSortValue(a.scheduledTime) - encounterTimeSortValue(b.scheduledTime));
+    return {
+      dateKey,
+      weekday: date.toLocaleDateString([], { weekday: "short" }),
+      dayLabel: date.toLocaleDateString([], { month: "short", day: "numeric" }),
+      isToday: dateKey === todayDateKey(),
+      encounters,
+    };
+  }),
+);
+function seededCareTeamReports(resident: Resident): CareTeamReportSummary[] {
+  const abnormalVital = resident.situation.vitals.find((vital) => vital.isAbnormal);
+  const concern = resident.situation.concerns[0];
+  const recentEvent = resident.timeline[0];
+  return [
+    {
+      id: `seed-cna-${resident.id}`,
+      residentId: resident.id,
+      reporterId: cnaUser.id,
+      reporterName: cnaUser.name,
+      reporterRole: "CNA",
+      reportedAt: recentEvent?.timeAgo ?? "Earlier this shift",
+      summary: recentEvent?.text ?? resident.latest,
+      whyItMatters: abnormalVital
+        ? `This observation should be reconciled with the abnormal ${abnormalVital.label.toLowerCase()} during the encounter.`
+        : "This helps confirm whether the resident remains at baseline before the provider assessment.",
+      severity: abnormalVital ? "high" : "watch",
+    },
+    {
+      id: `seed-nurse-${resident.id}`,
+      residentId: resident.id,
+      reporterId: "u1",
+      reporterName: userName("u1"),
+      reporterRole: "RN, Charge",
+      reportedAt: "1 hour ago",
+      summary: concern
+        ? `${concern.title} remains ${concern.status.toLowerCase()}. ${resident.latest}`
+        : `Nursing reports: ${resident.latest}.`,
+      whyItMatters: concern
+        ? "This unresolved concern may change today’s assessment, orders, or follow-up plan."
+        : "This gives the provider a current nursing baseline to compare with the resident examination.",
+      severity: concern?.color === "coral" ? "high" : "watch",
+    },
+  ];
+}
+function careTeamReportsForEncounter(encounter: ProviderVisit) {
+  const resident = encounterResident(encounter);
+  const liveDebriefs: CareTeamReportSummary[] = cnaDebriefs.value
+    .filter((entry) => entry.residentId === encounter.residentId && entry.transcript.trim())
+    .map((entry) => ({
+      id: `report-${entry.assignmentId}`,
+      residentId: entry.residentId,
+      reporterId: cnaUser.id,
+      reporterName: cnaUser.name,
+      reporterRole: "CNA",
+      reportedAt: entry.capturedAt ?? "Current shift",
+      summary: entry.flaggedConcern ? `${entry.transcript} ${entry.flaggedConcern}` : entry.transcript,
+      whyItMatters: entry.status === "flagged"
+        ? "The CNA flagged a change that needs provider reconciliation during this encounter."
+        : "This direct-care observation helps validate the resident’s current function and symptoms.",
+      severity: entry.status === "flagged" ? "high" : "watch",
+    }));
+  const liveActionUpdates: CareTeamReportSummary[] = actionRequests.value
+    .filter((action) => action.residentId === encounter.residentId && action.statusNote?.trim())
+    .map((action) => {
+      const reporterId = action.statusChangedById ?? action.assignedUserId;
+      return {
+        id: `report-action-${action.id}`,
+        residentId: action.residentId,
+        reporterId,
+        reporterName: userName(reporterId),
+        reporterRole: userRoleLabel(reporterId),
+        reportedAt: action.statusChangedAt ?? action.updatedAt,
+        summary: action.statusNote!.trim(),
+        whyItMatters: action.status === "flagged"
+          ? "This action was flagged and may require a change in the assessment or care plan."
+          : "This update confirms what the care team completed or still needs from the provider.",
+        severity: action.status === "flagged" ? "high" as const : "normal" as const,
+      };
+    });
+  return [...liveDebriefs, ...liveActionUpdates, ...seededCareTeamReports(resident)]
+    .filter((report) => report.reporterId !== activeStaffUser.value.id)
+    .filter((report, index, all) => all.findIndex((entry) => entry.id === report.id) === index)
+    .slice(0, 3);
+}
 const revisionModalSection = computed(() =>
   revisionModalSectionId.value
     ? activeReviewEncounter.value?.sections.find((section) => section.id === revisionModalSectionId.value) ?? null
@@ -2575,6 +2775,20 @@ const selectedResidentVisits = computed(() =>
         .sort((a, b) => b.startedAtMs - a.startedAtMs)
     : [],
 );
+const selectedResidentVisitCounts = computed(() => ({
+  all: selectedResidentVisits.value.length,
+  "needs-review": selectedResidentVisits.value.filter((visit) => visit.status === "needs-review").length,
+  done: selectedResidentVisits.value.filter((visit) => visit.status === "submitted-to-billing").length,
+}));
+const filteredSelectedResidentVisits = computed(() => {
+  if (encounterHistoryFilter.value === "needs-review") {
+    return selectedResidentVisits.value.filter((visit) => visit.status === "needs-review");
+  }
+  if (encounterHistoryFilter.value === "done") {
+    return selectedResidentVisits.value.filter((visit) => visit.status === "submitted-to-billing");
+  }
+  return selectedResidentVisits.value;
+});
 const providerOpportunityByResidentId = computed(() => {
   const map = new Map<string, ProviderOpportunity>();
   filteredProviderOpportunities.value.forEach((opportunity) => {
@@ -2855,6 +3069,14 @@ const startEncounterResident = computed(() =>
   startEncounterResidentId.value
     ? residents.find((resident) => resident.id === startEncounterResidentId.value) ?? null
     : null,
+);
+const providerHomeEncounterResident = computed(() =>
+  residents.find((resident) => resident.id === providerHomeEncounterDraft.value.residentId) ?? null,
+);
+const providerHomeEncounterResidents = computed(() =>
+  filteredResidents.value.filter((resident) =>
+    residentMatchesSearch(resident, providerHomeEncounterSearchQuery.value),
+  ),
 );
 const deleteProviderNoteTarget = computed(() =>
   deleteProviderNoteId.value
@@ -4823,6 +5045,19 @@ function dateKeyFromDate(date: Date) {
   return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
 }
 
+function addDays(date: Date, offset: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + offset);
+  return next;
+}
+
+function startOfProviderWeek(date: Date) {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = start.getDay();
+  start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+  return start;
+}
+
 function todayDateKey() {
   return dateKeyFromDate(new Date());
 }
@@ -4831,6 +5066,10 @@ function offsetDateKey(offset: number) {
   const date = new Date();
   date.setDate(date.getDate() + offset);
   return dateKeyFromDate(date);
+}
+
+function changeProviderEncounterWeek(offset: number) {
+  providerScheduleWeekStart.value = addDays(providerScheduleWeekStart.value, offset * 7);
 }
 
 function dateFromKey(dateKey: string) {
@@ -6029,6 +6268,7 @@ function setView(view: ViewName) {
   editingClinicalOrderId.value = null;
   selectedScheduleDateKey.value = null;
   closeStartEncounterModal();
+  closeProviderHomeEncounterModal();
   closeActionStatusModal();
   closeThreadRenameModal();
   threadMenuOpen.value = false;
@@ -6039,9 +6279,8 @@ function setView(view: ViewName) {
     visitStopConfirmOpen.value = false;
   }
   if (view !== "provider-review") {
+    closeRevisionCommentModal();
     activeReviewVisitId.value = null;
-    revisionModalSectionId.value = null;
-    revisionModalThreadId.value = null;
     signEncounterConfirmOpen.value = false;
   }
   activeView.value = view;
@@ -6062,6 +6301,8 @@ function selectRole(role: RoleKey) {
   editingClinicalOrderId.value = null;
   selectedScheduleDateKey.value = null;
   closeStartEncounterModal();
+  closeProviderHomeEncounterModal();
+  closeRevisionCommentModal();
   closeThreadRenameModal();
   threadMenuOpen.value = false;
   stopVisitRecording();
@@ -6095,6 +6336,8 @@ function login() {
   activeVisitId.value = null;
   visitStopConfirmOpen.value = false;
   closeStartEncounterModal();
+  closeProviderHomeEncounterModal();
+  closeRevisionCommentModal();
   closeThreadRenameModal();
   threadMenuOpen.value = false;
   selectedResidentId.value = null;
@@ -6764,6 +7007,13 @@ function clearVisitElapsedTimer() {
   }
 }
 
+function clearRevisionVoiceTimer() {
+  if (revisionVoiceTimer) {
+    window.clearInterval(revisionVoiceTimer);
+    revisionVoiceTimer = null;
+  }
+}
+
 function syncVisitElapsed() {
   const visit = activeProviderVisit.value;
   visitElapsedSeconds.value = visit
@@ -6851,15 +7101,34 @@ function encounterResident(encounter: ProviderVisit) {
   return residents.find((resident) => resident.id === encounter.residentId) ?? residents[0];
 }
 
+function toggleDailyEncounter(encounterId: string) {
+  expandedDailyEncounterId.value = expandedDailyEncounterId.value === encounterId ? null : encounterId;
+}
+
+function openWeeklyEncounter(encounter: ProviderVisit) {
+  openResident(encounter.residentId);
+}
+
+function setEncounterHistoryFilter(filter: EncounterHistoryFilter) {
+  encounterHistoryFilter.value = filter;
+}
+
 function inProgressVisitForResident(residentId: string) {
   return providerVisitsState.value.find(
-    (visit) => visit.residentId === residentId && visit.status === "provider-in-progress",
+    (visit) =>
+      visit.residentId === residentId &&
+      visit.providerUserId === activeStaffUser.value.id &&
+      visit.status === "provider-in-progress",
   ) ?? null;
 }
 
 function scheduledVisitForResident(residentId: string) {
   return providerVisitsState.value.find(
-    (visit) => visit.residentId === residentId && visit.status === "scheduled",
+    (visit) =>
+      visit.residentId === residentId &&
+      visit.providerUserId === activeStaffUser.value.id &&
+      visit.scheduledDate === todayDateKey() &&
+      visit.status === "scheduled",
   ) ?? null;
 }
 
@@ -6953,6 +7222,42 @@ function requestStartEncounterForResident(resident: Resident) {
   };
 }
 
+function openProviderHomeEncounterModal() {
+  closeFloatingMenus();
+  providerHomeEncounterSearchQuery.value = "";
+  providerHomeEncounterDraft.value = {
+    residentId: "",
+    visitType: "Follow-Up",
+  };
+  providerHomeEncounterModalOpen.value = true;
+}
+
+function closeProviderHomeEncounterModal() {
+  providerHomeEncounterModalOpen.value = false;
+  providerHomeEncounterSearchQuery.value = "";
+  providerHomeEncounterDraft.value = {
+    residentId: "",
+    visitType: "Follow-Up",
+  };
+}
+
+function selectProviderHomeEncounterResident(resident: Resident) {
+  providerHomeEncounterDraft.value.residentId = resident.id;
+  providerHomeEncounterDraft.value.visitType = defaultVisitTypeForResident(resident);
+}
+
+function submitProviderHomeEncounter() {
+  const resident = providerHomeEncounterResident.value;
+  if (!resident) {
+    return;
+  }
+  const visitType = providerHomeEncounterDraft.value.visitType;
+  closeProviderHomeEncounterModal();
+  const existingVisit = inProgressVisitForResident(resident.id);
+  const scheduledVisit = scheduledVisitForResident(resident.id);
+  startVisitForResident(resident, visitType, existingVisit ?? scheduledVisit);
+}
+
 function startScheduledEncounter(encounter: ProviderVisit) {
   const resident = residents.find((entry) => entry.id === encounter.residentId);
   if (resident) {
@@ -7041,7 +7346,7 @@ function openVisitOrder() {
 }
 
 function openEncounterReview(encounter: ProviderVisit) {
-  if (encounter.status !== "needs-review") {
+  if (encounter.status !== "needs-review" && encounter.status !== "submitted-to-billing") {
     return;
   }
   openResident(encounter.residentId);
@@ -7053,9 +7358,8 @@ function openEncounterReview(encounter: ProviderVisit) {
 
 function returnToResidentEncounters() {
   const residentId = activeReviewEncounter.value?.residentId;
+  closeRevisionCommentModal();
   activeReviewVisitId.value = null;
-  revisionModalSectionId.value = null;
-  revisionModalThreadId.value = null;
   signEncounterConfirmOpen.value = false;
   activeView.value = "provider-home";
   if (residentId) {
@@ -7088,15 +7392,95 @@ function toggleAllEncounterSections(event: Event) {
 }
 
 function openRevisionCommentModal(section: EncounterSection, thread: RevisionThread | null = null) {
+  clearRevisionVoiceTimer();
+  const comment = thread?.comments[0];
   revisionModalSectionId.value = section.id;
   revisionModalThreadId.value = thread?.id ?? null;
-  revisionModalText.value = thread?.comments[0]?.body ?? "";
+  revisionModalText.value = comment?.body ?? "";
+  revisionModalInputKind.value = comment?.kind ?? "text";
+  revisionVoiceSeconds.value = comment?.durationSeconds ?? 0;
+  revisionVoicePhase.value = null;
+  revisionTextBeforeRecording.value = revisionModalText.value;
 }
 
 function closeRevisionCommentModal() {
+  clearRevisionVoiceTimer();
+  if (playingVoiceMessageId.value === "revision-voice-draft") {
+    stopVoicePlayback();
+  }
   revisionModalSectionId.value = null;
   revisionModalThreadId.value = null;
   revisionModalText.value = "";
+  revisionModalInputKind.value = "text";
+  revisionVoicePhase.value = null;
+  revisionVoiceSeconds.value = 0;
+  revisionTextBeforeRecording.value = "";
+}
+
+function revisionVoiceTranscript() {
+  const sectionTitle = revisionModalSection.value?.title ?? "this section";
+  return `Please revise the ${sectionTitle} section to reflect the provider’s clarification and align it with the documented clinical findings.`;
+}
+
+function startRevisionVoiceRecording() {
+  if (!revisionModalSection.value) {
+    return;
+  }
+  clearRevisionVoiceTimer();
+  revisionTextBeforeRecording.value = revisionModalText.value;
+  revisionModalInputKind.value = "voice";
+  revisionVoiceSeconds.value = 0;
+  revisionVoicePhase.value = "recording";
+  revisionVoiceTimer = window.setInterval(() => {
+    revisionVoiceSeconds.value += 1;
+  }, 1000);
+}
+
+function stopRevisionVoiceRecording() {
+  if (revisionVoicePhase.value !== "recording") {
+    return;
+  }
+  clearRevisionVoiceTimer();
+  revisionVoiceSeconds.value = Math.max(revisionVoiceSeconds.value, 8);
+  revisionVoicePhase.value = "preview";
+  const dictatedText = revisionVoiceTranscript();
+  revisionModalText.value = [revisionTextBeforeRecording.value.trim(), dictatedText]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function restartRevisionVoiceRecording() {
+  clearRevisionVoiceTimer();
+  revisionModalText.value = revisionTextBeforeRecording.value;
+  revisionModalInputKind.value = "voice";
+  revisionVoiceSeconds.value = 0;
+  revisionVoicePhase.value = "recording";
+  revisionVoiceTimer = window.setInterval(() => {
+    revisionVoiceSeconds.value += 1;
+  }, 1000);
+}
+
+function acceptRevisionVoiceRecording() {
+  if (revisionVoicePhase.value !== "preview") {
+    return;
+  }
+  revisionModalInputKind.value = "voice";
+  revisionVoicePhase.value = null;
+}
+
+function cancelRevisionVoiceRecording() {
+  clearRevisionVoiceTimer();
+  if (playingVoiceMessageId.value === "revision-voice-draft") {
+    stopVoicePlayback();
+  }
+  revisionModalText.value = revisionTextBeforeRecording.value;
+  revisionModalInputKind.value = "text";
+  revisionVoicePhase.value = null;
+  revisionVoiceSeconds.value = 0;
+}
+
+function toggleRevisionVoicePlayback() {
+  toggleVoicePlayback("revision-voice-draft", Math.max(revisionVoiceSeconds.value, 1));
 }
 
 function submitRevisionComment() {
@@ -7112,6 +7496,10 @@ function submitRevisionComment() {
   if (existingThread?.comments[0]) {
     existingThread.comments[0].body = text;
     existingThread.comments[0].createdAt = currentTimeLabel();
+    existingThread.comments[0].kind = revisionModalInputKind.value;
+    existingThread.comments[0].durationSeconds = revisionModalInputKind.value === "voice"
+      ? revisionVoiceSeconds.value
+      : undefined;
   } else {
     const now = Date.now();
     section.revisionThreads.push({
@@ -7125,6 +7513,8 @@ function submitRevisionComment() {
           role: "provider",
           body: text,
           createdAt: currentTimeLabel(),
+          kind: revisionModalInputKind.value,
+          durationSeconds: revisionModalInputKind.value === "voice" ? revisionVoiceSeconds.value : undefined,
         },
       ],
     });
@@ -7888,6 +8278,7 @@ onBeforeUnmount(() => {
   clearCnaRecordingTimer();
   clearVisitRecordingTimer();
   clearVisitElapsedTimer();
+  clearRevisionVoiceTimer();
 });
 </script>
 
@@ -8244,17 +8635,23 @@ onBeforeUnmount(() => {
             <ArrowLeft :size="19" />
           </button>
           <div class="title-stack encounter-review-title-stack">
-            <h1>Review Encounter</h1>
+            <h1>{{ activeReviewReadOnly ? "Encounter Note" : "Review Encounter" }}</h1>
             <div class="encounter-review-header-meta">
               <span class="encounter-review-header-scribe">
                 <span>Assigned Scribe(s):</span>
                 <strong>{{ scribeDisplayName(activeReviewEncounter.assignedScribe) }}</strong>
               </span>
               <span class="encounter-review-header-separator" aria-hidden="true">·</span>
-              <span class="chip compact warning">Needs Review</span>
+              <span class="chip compact" :class="activeReviewReadOnly ? 'success' : 'warning'">
+                {{ activeReviewReadOnly ? "Done" : "Needs Review" }}
+              </span>
             </div>
           </div>
-          <div class="encounter-review-header-actions" :class="{ 'has-revisions': activeReviewHasOpenRevisions }">
+          <div
+            v-if="!activeReviewReadOnly"
+            class="encounter-review-header-actions"
+            :class="{ 'has-revisions': activeReviewHasOpenRevisions }"
+          >
             <label class="review-all-switch header-review-all" :class="{ disabled: activeReviewHasOpenRevisions }">
               <input
                 type="checkbox"
@@ -8280,6 +8677,13 @@ onBeforeUnmount(() => {
               <Signature v-else :size="17" />
               {{ activeReviewHasOpenRevisions ? "Return to Scribe" : "Sign Encounter" }}
             </button>
+          </div>
+          <div v-else class="encounter-read-only-signature">
+            <CheckCircle :size="18" />
+            <span>
+              <strong>Signed encounter</strong>
+              <small>{{ activeReviewEncounter.signedSignature?.signedAt ?? "Submitted to billing" }}</small>
+            </span>
           </div>
         </header>
 
@@ -8335,11 +8739,11 @@ onBeforeUnmount(() => {
                       <span class="section-record-status-icon" aria-hidden="true">
                         <FileText :size="9" :stroke-width="2.5" />
                       </span>
-                      In Review
+                      {{ activeReviewReadOnly ? "Completed" : "In Review" }}
                     </span>
                     <small v-if="section.revisedAt">Revised by Scribe · {{ section.revisedAt }}</small>
                   </div>
-                  <div class="encounter-section-actions">
+                  <div v-if="!activeReviewReadOnly" class="encounter-section-actions">
                     <button type="button" class="section-action revision-action" @click="openRevisionCommentModal(section)">
                       <MessageSquarePlus :size="15" />
                       Add Revision Comment
@@ -8376,7 +8780,7 @@ onBeforeUnmount(() => {
                           <Check v-if="thread.status === 'addressed'" :size="12" />
                           {{ thread.status === "addressed" ? "Addressed" : "For Review" }}
                         </span>
-                        <template v-if="thread.status === 'open'">
+                        <template v-if="thread.status === 'open' && !activeReviewReadOnly">
                           <button type="button" aria-label="Edit revision request" @click="openRevisionCommentModal(section, thread)">
                             <Edit3 :size="14" />
                           </button>
@@ -8386,6 +8790,12 @@ onBeforeUnmount(() => {
                         </template>
                       </div>
                     </header>
+                    <VoiceMessageBubble
+                      v-if="thread.comments[0]?.kind === 'voice'"
+                      :duration-seconds="thread.comments[0]?.durationSeconds ?? 1"
+                      :playing="playingVoiceMessageId === `revision-comment:${thread.comments[0]?.id}`"
+                      @toggle="toggleVoicePlayback(`revision-comment:${thread.comments[0]?.id}`, thread.comments[0]?.durationSeconds ?? 1)"
+                    />
                     <p>{{ thread.comments[0]?.body }}</p>
                     <div v-if="thread.comments.length > 1" class="revision-reply-list">
                       <div v-for="reply in thread.comments.slice(1)" :key="reply.id" class="revision-reply-row">
@@ -8404,7 +8814,11 @@ onBeforeUnmount(() => {
                         </button>
                       </div>
                     </div>
-                    <form v-if="thread.status === 'open'" class="revision-inline-reply" @submit.prevent="submitRevisionReply(thread)">
+                    <form
+                      v-if="thread.status === 'open' && !activeReviewReadOnly"
+                      class="revision-inline-reply"
+                      @submit.prevent="submitRevisionReply(thread)"
+                    >
                       <input v-model="revisionReplyDrafts[thread.id]" type="text" placeholder="Add a comment..." />
                       <button type="submit" aria-label="Send reply" :disabled="!revisionReplyDrafts[thread.id]?.trim()">
                         <Send :size="15" />
@@ -8871,9 +9285,33 @@ onBeforeUnmount(() => {
                 {{ encounterCancellationFeedback }}
               </p>
 
-              <div v-if="selectedResidentVisits.length" class="visit-card-list">
+              <div class="encounter-history-filters segmented-tabs" role="tablist" aria-label="Encounter note status">
+                <button
+                  type="button"
+                  :class="{ active: encounterHistoryFilter === 'all' }"
+                  @click="setEncounterHistoryFilter('all')"
+                >
+                  All <span>{{ selectedResidentVisitCounts.all }}</span>
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: encounterHistoryFilter === 'needs-review' }"
+                  @click="setEncounterHistoryFilter('needs-review')"
+                >
+                  Needs Review <span>{{ selectedResidentVisitCounts['needs-review'] }}</span>
+                </button>
+                <button
+                  type="button"
+                  :class="{ active: encounterHistoryFilter === 'done' }"
+                  @click="setEncounterHistoryFilter('done')"
+                >
+                  Done <span>{{ selectedResidentVisitCounts.done }}</span>
+                </button>
+              </div>
+
+              <div v-if="filteredSelectedResidentVisits.length" class="visit-card-list">
                 <article
-                  v-for="visit in selectedResidentVisits"
+                  v-for="visit in filteredSelectedResidentVisits"
                   :key="visit.id"
                   class="visit-card"
                 >
@@ -8921,6 +9359,15 @@ onBeforeUnmount(() => {
                       Start Review
                     </button>
                     <button
+                      v-if="visit.status === 'submitted-to-billing'"
+                      class="primary-action compact-action"
+                      type="button"
+                      @click="openEncounterReview(visit)"
+                    >
+                      <Eye :size="15" />
+                      View Encounter
+                    </button>
+                    <button
                       v-if="visit.status === 'revision'"
                       class="soft-action compact-action mock-sync-action"
                       type="button"
@@ -8951,7 +9398,11 @@ onBeforeUnmount(() => {
                 </article>
               </div>
               <p v-else class="empty-copy">
-                No encounters documented for this resident yet.
+                {{ encounterHistoryFilter === "needs-review"
+                  ? "No encounter notes need review for this resident."
+                  : encounterHistoryFilter === "done"
+                    ? "No signed encounter notes are complete for this resident yet."
+                    : "No encounters documented for this resident yet." }}
               </p>
             </section>
           </div>
@@ -9747,14 +10198,20 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-else-if="activeView === 'provider-home'" class="screen role-screen">
-        <header class="screen-header">
+        <header class="screen-header provider-home-header">
           <div>
             <h1>Provider Home</h1>
             <p>{{ greeting }} {{ displayFirstName(activeStaffUser.name) }} · {{ filteredResidents.length }} active residents</p>
           </div>
-          <div class="header-metric">
-            <strong>{{ dailyProviderEncounters.length }}</strong>
-            <span>encounters today</span>
+          <div class="provider-home-header-actions">
+            <button class="primary-action provider-home-add-encounter" type="button" @click="openProviderHomeEncounterModal">
+              <FileText :size="16" />
+              Add an Encounter
+            </button>
+            <div class="header-metric">
+              <strong>{{ dailyProviderEncounters.length }}</strong>
+              <span>encounters {{ dailyEncounterPeriodLabel }}</span>
+            </div>
           </div>
         </header>
 
@@ -9765,9 +10222,17 @@ onBeforeUnmount(() => {
                 <div class="notes-panel-header">
                   <div>
                     <div class="section-label">Daily Encounter List</div>
-                    <h2>Residents to see today</h2>
+                    <h2>{{ dailyEncounterHeading }}</h2>
                   </div>
                   <span class="chip compact">{{ dailyProviderEncounters.length }} scheduled</span>
+                </div>
+
+                <div v-if="showingTomorrowEncounters" class="daily-rollover-banner" role="status">
+                  <CheckCircle :size="17" />
+                  <span>
+                    <strong>Today’s encounter list is complete</strong>
+                    <small>Showing the next scheduled visits for tomorrow.</small>
+                  </span>
                 </div>
 
                 <div v-if="dailyProviderEncounters.length" class="attention-list daily-visit-cards">
@@ -9775,79 +10240,121 @@ onBeforeUnmount(() => {
                     v-for="encounter in dailyProviderEncounters"
                     :key="encounter.id"
                     class="attention-card daily-visit-card"
+                    :class="{ expanded: expandedDailyEncounterId === encounter.id }"
                   >
-                    <div class="attention-head">
-                      <img class="avatar" :src="encounterResident(encounter).image" :alt="encounter.residentName" />
-                      <div class="attention-head-copy">
-                        <div class="attention-title-row">
-                          <strong>{{ encounter.residentName }}</strong>
-                          <span class="chip compact" :class="statusTone(providerVisitStatusLabel(encounter))">
-                            {{ providerVisitStatusLabel(encounter) }}
+                    <button
+                      class="daily-visit-accordion-toggle"
+                      type="button"
+                      :aria-expanded="expandedDailyEncounterId === encounter.id"
+                      :aria-controls="`daily-encounter-details-${encounter.id}`"
+                      @click="toggleDailyEncounter(encounter.id)"
+                    >
+                      <span class="daily-visit-toggle-copy">
+                        <span class="attention-head">
+                          <img class="avatar" :src="encounterResident(encounter).image" :alt="encounter.residentName" />
+                          <span class="attention-head-copy">
+                            <span class="attention-title-row">
+                              <strong>{{ encounter.residentName }}</strong>
+                              <span class="chip compact" :class="statusTone(providerVisitStatusLabel(encounter))">
+                                {{ providerVisitStatusLabel(encounter) }}
+                              </span>
+                            </span>
+                            <small>{{ residentFacility(encounterResident(encounter)) }} · Room {{ encounterResident(encounter).room }}</small>
                           </span>
-                        </div>
-                        <small>{{ residentFacility(encounterResident(encounter)) }} · Room {{ encounterResident(encounter).room }}</small>
-                      </div>
-                    </div>
-                    <div class="chip-row daily-visit-status">
-                      <span class="chip compact" :class="statusTone(encounter.clinicalPriority)">
-                        {{ encounter.clinicalPriority }} priority
+                        </span>
+                        <span class="chip-row daily-visit-status">
+                          <span class="chip compact" :class="statusTone(encounter.clinicalPriority)">
+                            {{ encounter.clinicalPriority }} priority
+                          </span>
+                          <span class="chip compact">{{ encounter.scheduledTime }}</span>
+                          <span class="chip compact lavender">{{ encounter.visitType }}</span>
+                        </span>
                       </span>
-                      <span class="chip compact">{{ encounter.scheduledTime }}</span>
-                      <span class="chip compact lavender">{{ encounter.visitType }}</span>
-                    </div>
-                    <div class="daily-visit-reason">
-                      <div class="section-label">Reason for Visit</div>
-                      <strong>{{ encounter.visitReason }}</strong>
-                      <p>{{ encounterResident(encounter).situation.summary }}</p>
-                    </div>
-                    <div class="delegate-summary daily-visit-next daily-visit-baseline">
-                      <span><strong>Change from baseline:</strong> {{ encounter.baselineChange }}</span>
-                    </div>
-                    <div class="daily-visit-context-grid">
-                      <section v-if="encounterResident(encounter).situation.concerns.length" class="daily-visit-context-card">
-                        <div class="section-label">Unresolved Concerns</div>
-                        <div class="situation-concern-list compact-context-list">
-                          <div
-                            v-for="concern in encounterResident(encounter).situation.concerns.slice(0, 2)"
-                            :key="concern.title"
-                            class="concern-row"
-                          >
-                            <span class="dot" :class="concernTone(concern.color)" />
-                            <span>{{ concern.title }}</span>
-                            <span class="chip compact" :class="statusTone(concern.status)">
-                              {{ concern.status }}
-                            </span>
-                          </div>
-                        </div>
-                      </section>
-                      <section v-if="encounterResident(encounter).situation.vitals.length" class="daily-visit-context-card">
-                        <div class="section-label">Vitals</div>
-                        <div class="vital-list watch-vital-list">
-                          <div
-                            v-for="vital in encounterResident(encounter).situation.vitals.slice(0, 3)"
-                            :key="vital.label"
-                            class="vital-row compact-vital-row"
-                          >
-                            <component :is="iconFor(vital.icon)" :size="17" />
-                            <span>{{ vital.label }}</span>
-                            <small>Base {{ vital.base }}</small>
-                            <span
-                              class="vital-trend-arrow"
-                              :class="vitalTrendDirection(vital)"
-                              :aria-label="vitalTrendLabel(vital)"
+                      <span class="daily-visit-toggle-icon" aria-hidden="true">
+                        <ChevronUp v-if="expandedDailyEncounterId === encounter.id" :size="18" />
+                        <ChevronDown v-else :size="18" />
+                      </span>
+                    </button>
+                    <div
+                      v-show="expandedDailyEncounterId === encounter.id"
+                      :id="`daily-encounter-details-${encounter.id}`"
+                      class="daily-visit-accordion-details"
+                    >
+                      <div class="daily-visit-reason">
+                        <div class="section-label">Reason for Visit</div>
+                        <strong>{{ encounter.visitReason }}</strong>
+                        <p>{{ encounterResident(encounter).situation.summary }}</p>
+                      </div>
+                      <div class="delegate-summary daily-visit-next daily-visit-baseline">
+                        <span><strong>Change from baseline:</strong> {{ encounter.baselineChange }}</span>
+                      </div>
+                      <div class="daily-visit-context-grid">
+                        <section v-if="encounterResident(encounter).situation.concerns.length" class="daily-visit-context-card">
+                          <div class="section-label">Unresolved Concerns</div>
+                          <div class="situation-concern-list compact-context-list">
+                            <div
+                              v-for="concern in encounterResident(encounter).situation.concerns.slice(0, 2)"
+                              :key="concern.title"
+                              class="concern-row"
                             >
-                              <component :is="vitalTrendIcon(vital)" :size="15" />
-                            </span>
-                            <strong :class="{ abnormal: vital.isAbnormal, critical: vital.isCritical }">
-                              {{ vital.current }}
-                            </strong>
+                              <span class="dot" :class="concernTone(concern.color)" />
+                              <span>{{ concern.title }}</span>
+                              <span class="chip compact" :class="statusTone(concern.status)">
+                                {{ concern.status }}
+                              </span>
+                            </div>
                           </div>
+                        </section>
+                        <section v-if="encounterResident(encounter).situation.vitals.length" class="daily-visit-context-card">
+                          <div class="section-label">Vitals</div>
+                          <div class="vital-list watch-vital-list">
+                            <div
+                              v-for="vital in encounterResident(encounter).situation.vitals.slice(0, 3)"
+                              :key="vital.label"
+                              class="vital-row compact-vital-row"
+                            >
+                              <component :is="iconFor(vital.icon)" :size="17" />
+                              <span>{{ vital.label }}</span>
+                              <small>Base {{ vital.base }}</small>
+                              <span
+                                class="vital-trend-arrow"
+                                :class="vitalTrendDirection(vital)"
+                                :aria-label="vitalTrendLabel(vital)"
+                              >
+                                <component :is="vitalTrendIcon(vital)" :size="15" />
+                              </span>
+                              <strong :class="{ abnormal: vital.isAbnormal, critical: vital.isCritical }">
+                                {{ vital.current }}
+                              </strong>
+                            </div>
+                          </div>
+                        </section>
+                      </div>
+                      <section class="care-team-report-section">
+                        <div class="section-label">Care Team Reports</div>
+                        <div class="care-team-report-list">
+                          <article
+                            v-for="report in careTeamReportsForEncounter(encounter)"
+                            :key="report.id"
+                            class="care-team-report"
+                            :class="report.severity"
+                          >
+                            <header>
+                              <span><strong>{{ report.reporterName }}</strong> · {{ report.reporterRole }}</span>
+                              <small>{{ report.reportedAt }}</small>
+                            </header>
+                            <p>{{ report.summary }}</p>
+                            <div class="care-team-why">
+                              <Info :size="14" />
+                              <span><strong>Why it matters:</strong> {{ report.whyItMatters }}</span>
+                            </div>
+                          </article>
                         </div>
                       </section>
-                    </div>
-                    <div class="daily-visit-source">
-                      <span>Otangeles Notes+ Daily Visit List</span>
-                      <span>{{ encounter.providerName }}</span>
+                      <div class="daily-visit-source">
+                        <span>Otangeles Notes+ Daily Visit List</span>
+                        <span>{{ encounter.providerName }}</span>
+                      </div>
                     </div>
                     <div class="card-actions clinical-attention-actions">
                       <button
@@ -9862,8 +10369,68 @@ onBeforeUnmount(() => {
                   </article>
                 </div>
                 <p v-else class="empty-copy">
-                  No scheduled encounters for this facility right now.
+                  {{ dailyEncounterEmptyCopy }}
                 </p>
+              </article>
+            </section>
+
+            <section class="content-frame provider-weekly-encounters">
+              <article class="panel provider-week-panel">
+                <div class="notes-panel-header provider-week-header">
+                  <div>
+                    <div class="section-label">Weekly Schedule</div>
+                    <h2>Encounter schedule</h2>
+                    <p>{{ providerEncounterWeekLabel }}</p>
+                  </div>
+                  <div class="provider-week-controls">
+                    <button class="icon-button" type="button" aria-label="Previous week" @click="changeProviderEncounterWeek(-1)">
+                      <ArrowLeft :size="17" />
+                    </button>
+                    <button
+                      class="soft-action compact-action"
+                      type="button"
+                      @click="providerScheduleWeekStart = startOfProviderWeek(new Date())"
+                    >
+                      This week
+                    </button>
+                    <button class="icon-button" type="button" aria-label="Next week" @click="changeProviderEncounterWeek(1)">
+                      <ArrowRight :size="17" />
+                    </button>
+                  </div>
+                </div>
+                <div class="provider-week-grid">
+                  <section
+                    v-for="day in providerEncounterWeekDays"
+                    :key="day.dateKey"
+                    class="provider-week-day"
+                    :class="{ today: day.isToday }"
+                  >
+                    <header>
+                      <span>{{ day.weekday }}</span>
+                      <strong>{{ day.dayLabel }}</strong>
+                      <small>{{ day.encounters.length }} visit{{ day.encounters.length === 1 ? "" : "s" }}</small>
+                    </header>
+                    <div v-if="day.encounters.length" class="provider-week-day-visits">
+                      <button
+                        v-for="encounter in day.encounters"
+                        :key="encounter.id"
+                        type="button"
+                        class="provider-week-visit"
+                        @click="openWeeklyEncounter(encounter)"
+                      >
+                        <span>
+                          <strong>{{ encounter.scheduledTime }}</strong>
+                          <small>{{ encounter.residentName }}</small>
+                        </span>
+                        <span>{{ encounter.visitType }}</span>
+                        <span class="chip compact" :class="statusTone(providerVisitStatusLabel(encounter))">
+                          {{ providerVisitStatusLabel(encounter) }}
+                        </span>
+                      </button>
+                    </div>
+                    <p v-else>No visits</p>
+                  </section>
+                </div>
               </article>
             </section>
 
@@ -12506,13 +13073,48 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <form class="revision-comment-form" @submit.prevent="submitRevisionComment">
+          <div class="revision-voice-draft">
+            <div class="revision-voice-draft-head">
+              <span>
+                <strong>Draft with voice</strong>
+                <small>Record a revision request and review the generated transcript.</small>
+              </span>
+              <button
+                v-if="!revisionVoicePhase"
+                class="soft-action compact-action"
+                type="button"
+                @click="startRevisionVoiceRecording"
+              >
+                <Mic :size="15" />
+                {{ revisionModalInputKind === "voice" ? "Record Again" : "Record" }}
+              </button>
+            </div>
+            <VoiceRecordingControls
+              v-if="revisionVoicePhase"
+              :phase="revisionVoicePhase"
+              :seconds="revisionVoiceSeconds"
+              :playing="playingVoiceMessageId === 'revision-voice-draft'"
+              @cancel="cancelRevisionVoiceRecording"
+              @stop="stopRevisionVoiceRecording"
+              @rerecord="restartRevisionVoiceRecording"
+              @toggle-play="toggleRevisionVoicePlayback"
+              @send="acceptRevisionVoiceRecording"
+            />
+            <VoiceMessageBubble
+              v-else-if="revisionModalInputKind === 'voice' && revisionVoiceSeconds"
+              :duration-seconds="revisionVoiceSeconds"
+              :playing="playingVoiceMessageId === 'revision-voice-draft'"
+              mine
+              @toggle="toggleRevisionVoicePlayback"
+            />
+          </div>
           <label class="modal-text-field">
-            <span>Comment Description</span>
+            <span>{{ revisionModalInputKind === "voice" ? "Generated Transcript" : "Comment Description" }}</span>
             <textarea v-model="revisionModalText" rows="4" placeholder="Describe what the Scribe should revise..." autofocus />
           </label>
           <div class="modal-actions revision-modal-actions">
             <button class="soft-action" type="button" @click="closeRevisionCommentModal">Cancel</button>
-            <button class="primary-action" type="submit" :disabled="!revisionModalText.trim()">
+            <button class="primary-action" type="submit" :disabled="!revisionModalText.trim() || revisionVoicePhase === 'recording'">
               <Send :size="16" /> Submit
             </button>
           </div>
@@ -12639,6 +13241,79 @@ onBeforeUnmount(() => {
           >
             <Trash2 :size="16" />
             Confirm Cancel Visit
+          </button>
+        </div>
+      </article>
+    </div>
+
+    <div v-if="providerHomeEncounterModalOpen" class="modal-backdrop" @click="closeProviderHomeEncounterModal">
+      <article class="modal-card profile-modal provider-home-encounter-modal" @click.stop>
+        <button class="icon-button close-modal" type="button" aria-label="Close" @click="closeProviderHomeEncounterModal">
+          <X :size="18" />
+        </button>
+        <h2>Add Encounter</h2>
+        <p>Select a resident and encounter type. The encounter will start immediately.</p>
+        <div class="schedule-search-block">
+          <div class="section-label">Resident</div>
+          <label class="search-panel schedule-search-field">
+            <Search :size="17" />
+            <input
+              v-model="providerHomeEncounterSearchQuery"
+              type="search"
+              placeholder="Search by resident, room, facility, condition, or summary"
+              autofocus
+            />
+          </label>
+          <div class="provider-home-resident-results">
+            <button
+              v-for="resident in providerHomeEncounterResidents.slice(0, 7)"
+              :key="resident.id"
+              type="button"
+              class="schedule-search-result"
+              :class="{ selected: providerHomeEncounterDraft.residentId === resident.id }"
+              @click="selectProviderHomeEncounterResident(resident)"
+            >
+              <img class="avatar" :src="resident.image" :alt="resident.name" />
+              <span>
+                <strong>{{ resident.name }}</strong>
+                <small>Room {{ resident.room }} · {{ residentFacility(resident) }} · {{ resident.acuity }}</small>
+              </span>
+              <Check v-if="providerHomeEncounterDraft.residentId === resident.id" :size="16" />
+            </button>
+          </div>
+          <p v-if="!providerHomeEncounterResidents.length" class="empty-copy compact-empty">
+            No residents match this search in the selected facility.
+          </p>
+        </div>
+        <div v-if="providerHomeEncounterResident" class="selected-context-row provider-home-selected-resident">
+          <img class="avatar" :src="providerHomeEncounterResident.image" :alt="providerHomeEncounterResident.name" />
+          <span>
+            <strong>{{ providerHomeEncounterResident.name }}</strong>
+            <small>{{ providerHomeEncounterResident.latest }}</small>
+          </span>
+        </div>
+        <div class="modal-form">
+          <label>
+            Encounter Type
+            <AppSelect
+              v-model="providerHomeEncounterDraft.visitType"
+              :options="visitTypeSelectOptions"
+              aria-label="Select encounter type"
+            />
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="soft-action" type="button" @click="closeProviderHomeEncounterModal">Cancel</button>
+          <button
+            class="primary-action"
+            type="button"
+            :disabled="!providerHomeEncounterResident"
+            @click="submitProviderHomeEncounter"
+          >
+            <FileText :size="16" />
+            {{ providerHomeEncounterResident && inProgressVisitForResident(providerHomeEncounterResident.id)
+              ? "Continue Encounter"
+              : "Start Encounter" }}
           </button>
         </div>
       </article>
