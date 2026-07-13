@@ -10204,9 +10204,13 @@ onBeforeUnmount(() => {
             <p>{{ greeting }} {{ displayFirstName(activeStaffUser.name) }} · {{ filteredResidents.length }} active residents</p>
           </div>
           <div class="provider-home-header-actions">
-            <button class="primary-action compact-action" type="button" @click="openProviderHomeEncounterModal">
+            <button
+              class="primary-action compact-action provider-home-add-encounter"
+              type="button"
+              @click="openProviderHomeEncounterModal"
+            >
               <FileText :size="16" />
-              Add Encounter
+              Add an Encounter
             </button>
             <div class="header-metric">
               <strong>{{ dailyProviderEncounters.length }}</strong>

@@ -3529,8 +3529,10 @@ input[type="radio"] {
     margin-left: 0;
   }
 
-  .provider-home-add-encounter {
+  .primary-action.compact-action.provider-home-add-encounter {
+    flex: 1 1 100%;
     width: 100%;
+    min-width: 0;
   }
 
   .provider-week-header {
