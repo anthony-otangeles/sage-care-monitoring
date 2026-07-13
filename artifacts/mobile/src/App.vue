@@ -10204,9 +10204,9 @@ onBeforeUnmount(() => {
             <p>{{ greeting }} {{ displayFirstName(activeStaffUser.name) }} · {{ filteredResidents.length }} active residents</p>
           </div>
           <div class="provider-home-header-actions">
-            <button class="primary-action provider-home-add-encounter" type="button" @click="openProviderHomeEncounterModal">
+            <button class="primary-action compact-action" type="button" @click="openProviderHomeEncounterModal">
               <FileText :size="16" />
-              Add an Encounter
+              Add Encounter
             </button>
             <div class="header-metric">
               <strong>{{ dailyProviderEncounters.length }}</strong>
@@ -11971,7 +11971,7 @@ onBeforeUnmount(() => {
               </label>
               <span class="avatar-wrap">
                 <span class="staff-avatar" aria-hidden="true">
-                  <component :is="careUserIcon(user)" :size="18" />
+                    <component :is="careUserIcon(user)" :size="18" />
                 </span>
                 <span class="presence" :class="user.presence" />
               </span>
